@@ -23,7 +23,6 @@
 
 // Include OptiX headers
 #include <optix.h>
-#include <optix_stubs.h>
 // Launch parameters for sky view factor calculation
 rtDeclareVariable(rtObject, top_object, , );
 rtDeclareVariable(unsigned int, random_seed, , );

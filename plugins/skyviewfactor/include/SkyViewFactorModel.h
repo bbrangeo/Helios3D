@@ -17,7 +17,7 @@
 #define SKYVIEWFACTORMODEL_H
 
 #include "Context.h"
-#include "SkyViewFactorRayTracing.h"
+#include "SkyViewFactorRayTracing_Common.h"
 #include <vector>
 #include <string>
 

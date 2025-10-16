@@ -222,9 +222,18 @@ if(CUDA_AVAILABLE)
             $<$<COMPILE_LANGUAGE:CUDA>:CUDA_AVAILABLE>
             $<$<COMPILE_LANGUAGE:CUDA>:OPTIX_AVAILABLE>
         )
+        # Also add to C++ files for conditional compilation
+        target_compile_definitions(skyviewfactor PRIVATE 
+            $<$<COMPILE_LANGUAGE:CXX>:CUDA_AVAILABLE>
+            $<$<COMPILE_LANGUAGE:CXX>:OPTIX_AVAILABLE>
+        )
     else()
         target_compile_definitions(skyviewfactor PRIVATE 
             $<$<COMPILE_LANGUAGE:CUDA>:CUDA_AVAILABLE>
+        )
+        # Add CUDA_AVAILABLE to C++ files but not OPTIX_AVAILABLE
+        target_compile_definitions(skyviewfactor PRIVATE 
+            $<$<COMPILE_LANGUAGE:CXX>:CUDA_AVAILABLE>
         )
     endif()
 

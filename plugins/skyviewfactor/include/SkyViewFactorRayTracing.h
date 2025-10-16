@@ -16,13 +16,7 @@
 #ifndef SKYVIEWFACTORRAYTRACING_H
 #define SKYVIEWFACTORRAYTRACING_H
 
-#include <stdint.h>
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-typedef unsigned int uint;
+#include "SkyViewFactorRayTracing_Common.h"
 
 // Only include OptiX-specific code when CUDA and OptiX are available
 #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
@@ -83,15 +77,7 @@ rtDeclareVariable(float, max_ray_length, , );
 rtDeclareVariable(float3, sample_point, , );
 rtDeclareVariable(uint, num_rays, , );
 
-// Ray payload for sky view factor calculation
-struct SkyViewFactorPayload {
-    bool visible;        ///< Whether the ray hits the sky (no obstacles)
-    float distance;      ///< Distance to first intersection
-    uint primitiveID;    ///< ID of intersected primitive
-    float3 hit_point;    ///< Hit point coordinates
-    float3 normal;       ///< Surface normal at hit point
-    float weight;        ///< Ray weight (cos²(θ))
-};
+// Ray payload for sky view factor calculation is defined in SkyViewFactorRayTracing_Common.h
 
 // Ray generation program for sky view factor calculation
 RT_PROGRAM void skyViewFactorRayGeneration() {
@@ -118,24 +104,7 @@ RT_PROGRAM void skyViewFactorBoundingBox(int primIdx, float result[6]) {
     // Implementation will be in .cu file
 }
 
-// Helper functions for sky view factor calculation
-__device__ __forceinline__ float3 generateHemisphereRay(uint index, uint totalRays, uint seed) {
-    // Generate uniform random direction on hemisphere
-    // Implementation will be in .cu file
-    return make_float3(0.0f, 0.0f, 1.0f);
-}
-
-__device__ __forceinline__ float calculateRayWeight(const float3& direction) {
-    // Calculate cos²(θ) weight for the ray
-    // Implementation will be in .cu file
-    return 1.0f;
-}
-
-__device__ __forceinline__ bool isRayVisible(const SkyViewFactorPayload& payload) {
-    // Check if ray is visible (no obstacles)
-    // Implementation will be in .cu file
-    return payload.visible;
-}
+// Helper functions for sky view factor calculation are defined in SkyViewFactorRayTracing_Common.h
 
 #endif // CUDA_AVAILABLE && OPTIX_AVAILABLE
 

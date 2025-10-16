@@ -14,7 +14,7 @@
 */
 
 #include "SkyViewFactorModel.h"
-#include "SkyViewFactorRayTracing.h"
+#include "SkyViewFactorRayTracing_Common.h"
 #include <cmath>
 #include <ctime>
 #include <fstream>

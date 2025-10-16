@@ -14,7 +14,7 @@
 */
 
 #include "SkyViewFactorCamera.h"
-#include "SkyViewFactorRayTracing.h"
+#include "SkyViewFactorRayTracing_Common.h"
 #include <cmath>
 #include <fstream>
 #include <iomanip>

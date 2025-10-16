@@ -24,6 +24,39 @@
 
 using namespace optix;
 
+// Helper function to generate uniform random direction on hemisphere
+__device__ __forceinline__ float3 generateHemisphereRay(uint index, uint totalRays, uint seed) {
+    // Use index and seed to generate deterministic random numbers
+    uint rng = seed + index * 1103515245u + 12345u;
+    rng = rng * 1103515245u + 12345u;
+    
+    // Generate two random numbers
+    float u1 = (float)(rng & 0x7FFFFFFF) / 2147483647.0f;
+    rng = rng * 1103515245u + 12345u;
+    float u2 = (float)(rng & 0x7FFFFFFF) / 2147483647.0f;
+    
+    // Generate uniform distribution on hemisphere using cosine-weighted sampling
+    float cosTheta = sqrt(u1);
+    float sinTheta = sqrt(1.0f - u1);
+    float phi = 2.0f * M_PI * u2;
+    
+    // Convert to Cartesian coordinates (assuming Z is up)
+    float3 direction;
+    direction.x = sinTheta * cos(phi);
+    direction.y = sinTheta * sin(phi);
+    direction.z = cosTheta;
+    
+    return direction;
+}
+
+// Helper function to calculate ray weight
+__device__ __forceinline__ float calculateRayWeight(const float3& direction) {
+    // Calculate cos²(θ) weight for the ray
+    // direction.z is cos(θ) since we're working in hemisphere (z > 0)
+    float cosTheta = direction.z;
+    return cosTheta * cosTheta;
+}
+
 // Ray generation program for sky view factor calculation
 RT_PROGRAM void skyViewFactorRayGeneration() {
     // Get launch parameters
@@ -66,36 +99,6 @@ RT_PROGRAM void skyViewFactorRayGeneration() {
     
     // Store results
     ray_visibility[rayIndex] = payload.visible;
-}
-
-// Helper function to generate uniform random direction on hemisphere
-__device__ __forceinline__ float3 generateHemisphereRay(uint index, uint totalRays, uint seed) {
-    // Use index and seed to generate deterministic random numbers
-    uint rng = seed + index * 1103515245u + 12345u;
-    
-    // Generate two random numbers
-    float u1 = (float)(rng & 0x7FFFFFFF) / 2147483647.0f;
-    rng = rng * 1103515245u + 12345u;
-    float u2 = (float)(rng & 0x7FFFFFFF) / 2147483647.0f;
-    
-    // Convert to spherical coordinates for uniform distribution on hemisphere
-    float theta = acosf(sqrtf(u1));  // Zenith angle (0 to π/2)
-    float phi = 2.0f * M_PI * u2;    // Azimuth angle (0 to 2π)
-    
-    // Convert to Cartesian coordinates
-    float x = sinf(theta) * cosf(phi);
-    float y = sinf(theta) * sinf(phi);
-    float z = cosf(theta);
-    
-    return make_float3(x, y, z);
-}
-
-// Helper function to calculate ray weight
-__device__ __forceinline__ float calculateRayWeight(const float3& direction) {
-    // Calculate cos²(θ) weight for the ray
-    // direction.z is cos(θ) since we're working in hemisphere (z > 0)
-    float cosTheta = direction.z;
-    return cosTheta * cosTheta;
 }
 
 // Helper function to check if ray is visible

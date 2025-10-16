@@ -35,9 +35,20 @@ SkyViewFactorModel::SkyViewFactorModel(Context* context_a) {
     rayCount = rayCount_default;
     maxRayLength = 1000.0f; // 1 km default
     
-    // Initialize CUDA/OptiX flags
-    cuda_flag = false;
-    optix_flag = false;
+    // Initialize CUDA/OptiX flags based on compilation definitions
+    #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
+        cuda_flag = true;
+        optix_flag = true;
+        if (message_flag) {
+            std::cout << "SkyViewFactorModel: CUDA and OptiX support compiled in" << std::endl;
+        }
+    #else
+        cuda_flag = false;
+        optix_flag = false;
+        if (message_flag) {
+            std::cout << "SkyViewFactorModel: CUDA/OptiX not available - using CPU implementation" << std::endl;
+        }
+    #endif
     
     // Initialize CUDA/OptiX contexts
     cuda_context = nullptr;
@@ -50,21 +61,21 @@ SkyViewFactorModel::SkyViewFactorModel(Context* context_a) {
     skyViewFactors.clear();
     samplePoints.clear();
     
-    // Try to initialize OptiX
-    try {
-        initializeOptiX();
-        optix_flag = true;
-        cuda_flag = true;
-        if (message_flag) {
-            std::cout << "SkyViewFactorModel: OptiX initialized successfully" << std::endl;
+    // Try to initialize OptiX if available
+    if (optix_flag) {
+        try {
+            initializeOptiX();
+            if (message_flag) {
+                std::cout << "SkyViewFactorModel: OptiX initialized successfully" << std::endl;
+            }
+        } catch (const std::exception& e) {
+            if (message_flag) {
+                std::cout << "SkyViewFactorModel: OptiX initialization failed: " << e.what() << std::endl;
+                std::cout << "SkyViewFactorModel: Falling back to CPU implementation" << std::endl;
+            }
+            optix_flag = false;
+            cuda_flag = false;
         }
-    } catch (const std::exception& e) {
-        if (message_flag) {
-            std::cout << "SkyViewFactorModel: OptiX initialization failed: " << e.what() << std::endl;
-            std::cout << "SkyViewFactorModel: Falling back to CPU implementation" << std::endl;
-        }
-        optix_flag = false;
-        cuda_flag = false;
     }
 }
 
@@ -77,17 +88,23 @@ void SkyViewFactorModel::initializeOptiX() {
     // This is a simplified version - full implementation would require
     // proper OptiX context creation, module loading, etc.
     
-    // For now, we'll implement a basic structure
-    // In a full implementation, this would:
-    // 1. Create OptiX context
-    // 2. Load PTX modules
-    // 3. Create program groups
-    // 4. Create pipeline
-    // 5. Set up ray generation and hit programs
-    
-    if (message_flag) {
-        std::cout << "SkyViewFactorModel: OptiX initialization placeholder" << std::endl;
-    }
+    #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
+        // For now, we'll implement a basic structure
+        // In a full implementation, this would:
+        // 1. Create OptiX context
+        // 2. Load PTX modules
+        // 3. Create program groups
+        // 4. Create pipeline
+        // 5. Set up ray generation and hit programs
+        
+        if (message_flag) {
+            std::cout << "SkyViewFactorModel: OptiX initialization placeholder - GPU support detected but not fully implemented" << std::endl;
+        }
+    #else
+        if (message_flag) {
+            std::cout << "SkyViewFactorModel: OptiX not available at compile time" << std::endl;
+        }
+    #endif
 }
 
 void SkyViewFactorModel::cleanupOptiX() {
@@ -213,13 +230,23 @@ float SkyViewFactorModel::calculateSkyViewFactorCPU(const vec3& point) {
 
 float SkyViewFactorModel::calculateSkyViewFactorGPU(const vec3& point) {
     // GPU implementation using OptiX
-    // This is a placeholder - full implementation would use OptiX ray tracing
+    // For now, we'll use a simplified GPU approach or fall back to CPU
     
-    if (message_flag) {
-        std::cout << "SkyViewFactorModel: GPU implementation not yet implemented, falling back to CPU" << std::endl;
-    }
-    
-    return calculateSkyViewFactorCPU(point);
+    #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
+        // TODO: Implement full OptiX ray tracing
+        // For now, we'll use the CPU implementation as a fallback
+        // but indicate that GPU support is available
+        if (message_flag) {
+            std::cout << "SkyViewFactorModel: Using CPU implementation (GPU OptiX ray tracing not yet fully implemented)" << std::endl;
+        }
+        return calculateSkyViewFactorCPU(point);
+    #else
+        // This should not be called if OptiX is not available
+        if (message_flag) {
+            std::cout << "SkyViewFactorModel: GPU implementation called but OptiX not available, falling back to CPU" << std::endl;
+        }
+        return calculateSkyViewFactorCPU(point);
+    #endif
 }
 
 float SkyViewFactorModel::calculateSkyViewFactor(const vec3& point) {

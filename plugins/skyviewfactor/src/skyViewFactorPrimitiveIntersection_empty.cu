@@ -13,5 +13,10 @@
 
 */
 
+#include "SkyViewFactorRayTracing.h"
+
 // This file is used when OptiX is not available to provide empty implementations
 // The actual OptiX code is in skyViewFactorPrimitiveIntersection.cu but only compiled when OptiX is available
+
+// Empty implementations for when OptiX is not available
+// These functions will be called but do nothing

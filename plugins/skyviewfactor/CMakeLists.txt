@@ -13,7 +13,7 @@ add_library(skyviewfactor STATIC "src/SkyViewFactorModel.cpp" "src/SkyViewFactor
 target_include_directories(skyviewfactor PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 # Initialize OptiX availability to false
-set(OPTIX_AVAILABLE FALSE)
+set(OPTIX_AVAILABLE TRUE)
 
 # Check if CUDA is available
 find_package(CUDAToolkit QUIET)
@@ -192,6 +192,9 @@ if(CUDA_AVAILABLE)
                 src/skyViewFactorPrimitiveIntersection_empty.cu
         )
     endif()
+    
+    # Add CUDA sources to the library target
+    target_sources(skyviewfactor PRIVATE ${CUDA_SOURCES})
 
     # PTX compilation (only if OptiX is available)
     if(OPTIX_AVAILABLE)

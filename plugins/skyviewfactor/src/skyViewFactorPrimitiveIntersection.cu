@@ -18,7 +18,8 @@
 // Only compile OptiX code if both CUDA and OptiX are available
 #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
 
-// Include additional OptiX headers for math functions
+// Include OptiX headers directly to ensure all macros are available
+#include <optix.h>
 #include <optixu/optixu_math_namespace.h>
 #include <optixu/optixu_vector_types.h>
 

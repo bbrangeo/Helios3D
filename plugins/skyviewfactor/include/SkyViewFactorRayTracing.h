@@ -18,8 +18,12 @@
 
 #include "SkyViewFactorRayTracing_Common.h"
 
-//// Only include OptiX-specific code when CUDA and OptiX are available
+// Only include OptiX-specific code when CUDA and OptiX are available
 #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
+
+// Include OptiX headers
+#include <optix.h>
+#include <optix_stubs.h>
 // Launch parameters for sky view factor calculation
 rtDeclareVariable(rtObject, top_object, , );
 rtDeclareVariable(unsigned int, random_seed, , );

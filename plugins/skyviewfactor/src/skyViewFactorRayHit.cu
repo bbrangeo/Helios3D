@@ -14,6 +14,9 @@
 */
 
 #include "SkyViewFactorRayTracing.h"
+
+// Only compile OptiX code if both CUDA and OptiX are available
+#if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
 #include <optix.h>
 #include <optixu/optixu_math_namespace.h>
 #include <optixu/optixu_vector_types.h>
@@ -73,3 +76,5 @@ RT_PROGRAM void skyViewFactorException() {
     // Log error (in a real implementation, this would use proper logging)
     rtPrintf("SkyViewFactor: Ray tracing exception occurred\n");
 }
+
+#endif // CUDA_AVAILABLE && OPTIX_AVAILABLE

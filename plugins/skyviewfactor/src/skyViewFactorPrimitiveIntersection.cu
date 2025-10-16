@@ -14,6 +14,9 @@
 */
 
 #include "SkyViewFactorRayTracing.h"
+
+// Only compile OptiX code if both CUDA and OptiX are available
+#if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
 #include <optix.h>
 #include <optixu/optixu_math_namespace.h>
 #include <optixu/optixu_vector_types.h>
@@ -119,3 +122,5 @@ __device__ __forceinline__ float fminf(float a, float b) {
 __device__ __forceinline__ float fmaxf(float a, float b) {
     return (a > b) ? a : b;
 }
+
+#endif // CUDA_AVAILABLE && OPTIX_AVAILABLE

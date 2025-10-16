@@ -12,6 +12,9 @@ add_library(skyviewfactor STATIC "src/SkyViewFactorModel.cpp" "src/SkyViewFactor
 
 target_include_directories(skyviewfactor PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
+# Initialize OptiX availability to false
+set(OPTIX_AVAILABLE FALSE)
+
 # Check if CUDA is available
 find_package(CUDAToolkit QUIET)
 if(CUDAToolkit_FOUND)
@@ -60,8 +63,17 @@ if(CUDA_AVAILABLE)
             set(OPTIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/lib/OptiX/linux64-6.5.0/)
             message("Using OptiX version 6.5")
         endif()
-        target_include_directories(skyviewfactor PUBLIC "${OPTIX_PATH}include" )
-        target_link_libraries( skyviewfactor PUBLIC ${OPTIX_PATH}lib64/liboptix.so )
+        
+        # Check if OptiX library actually exists
+        if(EXISTS "${OPTIX_PATH}include/optix.h" AND EXISTS "${OPTIX_PATH}lib64/liboptix.so")
+            target_include_directories(skyviewfactor PUBLIC "${OPTIX_PATH}include" )
+            target_link_libraries( skyviewfactor PUBLIC ${OPTIX_PATH}lib64/liboptix.so )
+            set(OPTIX_AVAILABLE TRUE)
+            message(STATUS "OptiX found and will be used")
+        else()
+            message(STATUS "OptiX libraries not found - using CPU-only implementation")
+            set(OPTIX_AVAILABLE FALSE)
+        endif()
     elseif(WIN32)
         if( OPTIX_VERSION_LEGACY )
             set(OPTIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/lib/OptiX/windows64-5.1.1/)
@@ -74,15 +86,26 @@ if(CUDA_AVAILABLE)
             set(OPTIX_DLL "optix.6.5.0.dll")
             message("Using OptiX version 6.5")
         endif()
-        target_include_directories(skyviewfactor PUBLIC "${OPTIX_PATH}include" )
-        target_link_libraries( skyviewfactor PUBLIC "${OPTIX_PATH}lib64/${OPTIX_LIB}" )
-        add_custom_command( TARGET skyviewfactor POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy "${OPTIX_PATH}lib64/${OPTIX_LIB}" "${CMAKE_BINARY_DIR}/." )
-        add_custom_command( TARGET skyviewfactor POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy "${OPTIX_PATH}bin64/${OPTIX_DLL}" "${CMAKE_BINARY_DIR}/." )
+        
+        # Check if OptiX library actually exists
+        if(EXISTS "${OPTIX_PATH}include/optix.h" AND EXISTS "${OPTIX_PATH}lib64/${OPTIX_LIB}")
+            target_include_directories(skyviewfactor PUBLIC "${OPTIX_PATH}include" )
+            target_link_libraries( skyviewfactor PUBLIC "${OPTIX_PATH}lib64/${OPTIX_LIB}" )
+            add_custom_command( TARGET skyviewfactor POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy "${OPTIX_PATH}lib64/${OPTIX_LIB}" "${CMAKE_BINARY_DIR}/." )
+            add_custom_command( TARGET skyviewfactor POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy "${OPTIX_PATH}bin64/${OPTIX_DLL}" "${CMAKE_BINARY_DIR}/." )
+            set(OPTIX_AVAILABLE TRUE)
+            message(STATUS "OptiX found and will be used")
+        else()
+            message(STATUS "OptiX libraries not found - using CPU-only implementation")
+            set(OPTIX_AVAILABLE FALSE)
+        endif()
     elseif(APPLE)
         message(STATUS "OptiX not supported on macOS - using CPU-only implementation")
+        set(OPTIX_AVAILABLE FALSE)
     endif()
 else()
     message(STATUS "CUDA not available - using CPU-only implementation")
+    set(OPTIX_AVAILABLE FALSE)
 endif()
 
 # Set CUDA flags after enabling language to avoid conflicts with CMake defaults (only if CUDA is available)
@@ -143,111 +166,128 @@ else()
     endif()
 endif()
 
-# Add CUDA_AVAILABLE definition for all platforms
+# Add CUDA_AVAILABLE and OPTIX_AVAILABLE definitions for all platforms
 if(CUDA_AVAILABLE)
     target_compile_definitions(skyviewfactor PRIVATE CUDA_AVAILABLE)
 endif()
 
-# CUDA sources and PTX compilation (only if CUDA is available)
-if(CUDA_AVAILABLE)
-    set( CUDA_SOURCES
-            src/skyViewFactorRayGeneration.cu
-            src/skyViewFactorRayHit.cu
-            src/skyViewFactorPrimitiveIntersection.cu
-    )
-
-    # OptiX-specific PTX compilation using direct nvcc calls
-    # OptiX requires special compilation with OptiX headers and runtime support
-
-    # Prepare OptiX-specific compilation flags  
-    set(OPTIX_NVCC_FLAGS
-        --ptx
-        --use_fast_math
-        -I${CMAKE_CURRENT_SOURCE_DIR}/include
-    )
-    
-    if(DEFINED OPTIX_PATH)
-        list(APPEND OPTIX_NVCC_FLAGS -I${OPTIX_PATH}include)
-    endif()
-
-if(WIN32)
-	list(APPEND OPTIX_NVCC_FLAGS -DNOMINMAX -D_USE_MATH_DEFINES -D_MWAITXINTRIN_H_INCLUDED -D__STRICT_ANSI__ )
-	if(CMAKE_BUILD_TYPE STREQUAL Debug OR NOT DEFINED CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
-		list(APPEND OPTIX_NVCC_FLAGS -g -O0)
-	else()
-		# Use -O3 for PTX compilation on Windows Release builds
-		list(APPEND OPTIX_NVCC_FLAGS -O3)
-	endif()
-else()
-	list(APPEND OPTIX_NVCC_FLAGS -Wno-deprecated-gpu-targets)
-	if(CMAKE_BUILD_TYPE STREQUAL Debug OR NOT DEFINED CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
-		list(APPEND OPTIX_NVCC_FLAGS -g -O0)
-	else()
-		# Use -O3 for PTX compilation on non-Windows Release builds
-		list(APPEND OPTIX_NVCC_FLAGS -O3)
-	endif()
-	list(APPEND OPTIX_NVCC_FLAGS -std=c++${CMAKE_CXX_STANDARD})
+if(OPTIX_AVAILABLE)
+    target_compile_definitions(skyviewfactor PRIVATE OPTIX_AVAILABLE)
 endif()
 
-# Generate PTX files using custom commands
-set(PTX_FILES "")
-foreach(CUDA_SOURCE ${CUDA_SOURCES})
-	get_filename_component(CUDA_SOURCE_NAME ${CUDA_SOURCE} NAME_WE)
-	get_filename_component(CUDA_SOURCE_DIR ${CUDA_SOURCE} DIRECTORY)
-	
-	# Output PTX file path
-	set(PTX_FILE "${CMAKE_BINARY_DIR}/plugins/skyviewfactor/${CUDA_SOURCE_NAME}.ptx")
-	list(APPEND PTX_FILES ${PTX_FILE})
-	
-	# Source file absolute path
-	set(CUDA_SOURCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/${CUDA_SOURCE}")
-	
-	# Custom command to compile CUDA source to PTX with OptiX support
-	add_custom_command(
-		OUTPUT ${PTX_FILE}
-		COMMAND ${CMAKE_CUDA_COMPILER} ${OPTIX_NVCC_FLAGS} -o ${PTX_FILE} ${CUDA_SOURCE_PATH}
-		DEPENDS ${CUDA_SOURCE_PATH}
-		WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-		COMMENT "Compiling OptiX PTX file ${CUDA_SOURCE_NAME}.ptx"
-		VERBATIM
-	)
-endforeach()
+# CUDA sources and PTX compilation
+if(CUDA_AVAILABLE)
+    if(OPTIX_AVAILABLE)
+        # Use OptiX-enabled sources
+        set( CUDA_SOURCES
+                src/skyViewFactorRayGeneration.cu
+                src/skyViewFactorRayHit.cu
+                src/skyViewFactorPrimitiveIntersection.cu
+        )
+    else()
+        # Use empty sources when OptiX is not available
+        set( CUDA_SOURCES
+                src/skyViewFactorRayGeneration_empty.cu
+                src/skyViewFactorRayHit_empty.cu
+                src/skyViewFactorPrimitiveIntersection_empty.cu
+        )
+    endif()
 
-# Create custom target to build all PTX files and copy them to expected locations
-add_custom_target(skyviewfactor_ptx ALL
-	DEPENDS ${PTX_FILES}
-)
+    # PTX compilation (only if OptiX is available)
+    if(OPTIX_AVAILABLE)
+        # OptiX-specific PTX compilation using direct nvcc calls
+        # OptiX requires special compilation with OptiX headers and runtime support
 
-# Ensure output directory exists
-add_custom_command(TARGET skyviewfactor_ptx PRE_BUILD
-	COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/plugins/skyviewfactor/
-)
+        # Prepare OptiX-specific compilation flags  
+        set(OPTIX_NVCC_FLAGS
+            --ptx
+            --use_fast_math
+            -I${CMAKE_CURRENT_SOURCE_DIR}/include
+        )
+        
+        if(DEFINED OPTIX_PATH)
+            list(APPEND OPTIX_NVCC_FLAGS -I${OPTIX_PATH}include)
+        endif()
 
-# Copy PTX files with both legacy and new naming conventions for compatibility
-set(CUDA_SOURCE_INDEX 0)
-foreach(CUDA_SOURCE ${CUDA_SOURCES})
-	get_filename_component(CUDA_SOURCE_NAME ${CUDA_SOURCE} NAME_WE)
-	list(GET PTX_FILES ${CUDA_SOURCE_INDEX} PTX_FILE)
-	
-	# Copy to new-style name (expected by newer versions)
-	add_custom_command(TARGET skyviewfactor_ptx POST_BUILD
-		COMMAND ${CMAKE_COMMAND} -E copy_if_different
-			${PTX_FILE}
-			${CMAKE_BINARY_DIR}/plugins/skyviewfactor/cuda_compile_ptx_1_generated_${CUDA_SOURCE_NAME}.cu.ptx
-	)
-	
-	# Copy to legacy name (expected by older versions)
-	add_custom_command(TARGET skyviewfactor_ptx POST_BUILD
-		COMMAND ${CMAKE_COMMAND} -E copy_if_different
-			${PTX_FILE}
-			${CMAKE_BINARY_DIR}/plugins/skyviewfactor/cuda_compile_ptx_generated_${CUDA_SOURCE_NAME}.cu.ptx
-	)
-	
-	math(EXPR CUDA_SOURCE_INDEX "${CUDA_SOURCE_INDEX} + 1")
-endforeach()
+        if(WIN32)
+            list(APPEND OPTIX_NVCC_FLAGS -DNOMINMAX -D_USE_MATH_DEFINES -D_MWAITXINTRIN_H_INCLUDED -D__STRICT_ANSI__ )
+            if(CMAKE_BUILD_TYPE STREQUAL Debug OR NOT DEFINED CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
+                list(APPEND OPTIX_NVCC_FLAGS -g -O0)
+            else()
+                # Use -O3 for PTX compilation on Windows Release builds
+                list(APPEND OPTIX_NVCC_FLAGS -O3)
+            endif()
+        else()
+            list(APPEND OPTIX_NVCC_FLAGS -Wno-deprecated-gpu-targets)
+            if(CMAKE_BUILD_TYPE STREQUAL Debug OR NOT DEFINED CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
+                list(APPEND OPTIX_NVCC_FLAGS -g -O0)
+            else()
+                # Use -O3 for PTX compilation on non-Windows Release builds
+                list(APPEND OPTIX_NVCC_FLAGS -O3)
+            endif()
+            list(APPEND OPTIX_NVCC_FLAGS -std=c++${CMAKE_CXX_STANDARD})
+        endif()
 
-    # Ensure main project depends on PTX target
-    add_dependencies(skyviewfactor skyviewfactor_ptx)
+        # Generate PTX files using custom commands
+        set(PTX_FILES "")
+        foreach(CUDA_SOURCE ${CUDA_SOURCES})
+            get_filename_component(CUDA_SOURCE_NAME ${CUDA_SOURCE} NAME_WE)
+            get_filename_component(CUDA_SOURCE_DIR ${CUDA_SOURCE} DIRECTORY)
+            
+            # Output PTX file path
+            set(PTX_FILE "${CMAKE_BINARY_DIR}/plugins/skyviewfactor/${CUDA_SOURCE_NAME}.ptx")
+            list(APPEND PTX_FILES ${PTX_FILE})
+            
+            # Source file absolute path
+            set(CUDA_SOURCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/${CUDA_SOURCE}")
+            
+            # Custom command to compile CUDA source to PTX with OptiX support
+            add_custom_command(
+                OUTPUT ${PTX_FILE}
+                COMMAND ${CMAKE_CUDA_COMPILER} ${OPTIX_NVCC_FLAGS} -o ${PTX_FILE} ${CUDA_SOURCE_PATH}
+                DEPENDS ${CUDA_SOURCE_PATH}
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                COMMENT "Compiling OptiX PTX file ${CUDA_SOURCE_NAME}.ptx"
+                VERBATIM
+            )
+        endforeach()
+
+        # Create custom target to build all PTX files and copy them to expected locations
+        add_custom_target(skyviewfactor_ptx ALL
+            DEPENDS ${PTX_FILES}
+        )
+
+        # Ensure output directory exists
+        add_custom_command(TARGET skyviewfactor_ptx PRE_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/plugins/skyviewfactor/
+        )
+
+        # Copy PTX files with both legacy and new naming conventions for compatibility
+        set(CUDA_SOURCE_INDEX 0)
+        foreach(CUDA_SOURCE ${CUDA_SOURCES})
+            get_filename_component(CUDA_SOURCE_NAME ${CUDA_SOURCE} NAME_WE)
+            list(GET PTX_FILES ${CUDA_SOURCE_INDEX} PTX_FILE)
+            
+            # Copy to new-style name (expected by newer versions)
+            add_custom_command(TARGET skyviewfactor_ptx POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    ${PTX_FILE}
+                    ${CMAKE_BINARY_DIR}/plugins/skyviewfactor/cuda_compile_ptx_1_generated_${CUDA_SOURCE_NAME}.cu.ptx
+            )
+            
+            # Copy to legacy name (expected by older versions)
+            add_custom_command(TARGET skyviewfactor_ptx POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    ${PTX_FILE}
+                    ${CMAKE_BINARY_DIR}/plugins/skyviewfactor/cuda_compile_ptx_generated_${CUDA_SOURCE_NAME}.cu.ptx
+            )
+            
+            math(EXPR CUDA_SOURCE_INDEX "${CUDA_SOURCE_INDEX} + 1")
+        endforeach()
+
+        # Ensure main project depends on PTX target
+        add_dependencies(skyviewfactor skyviewfactor_ptx)
+    endif()
 endif()
 
 if(BUILD_TESTS)

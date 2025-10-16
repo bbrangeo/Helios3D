@@ -24,8 +24,8 @@
 
 typedef unsigned int uint;
 
-// Only include OptiX-specific code when CUDA/OptiX is available
-#ifdef CUDA_AVAILABLE
+// Only include OptiX-specific code when CUDA and OptiX are available
+#if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
 // Launch parameters for sky view factor calculation
 rtDeclareVariable(rtObject, top_object, , );
 rtDeclareVariable(unsigned int, random_seed, , );
@@ -137,6 +137,6 @@ __device__ __forceinline__ bool isRayVisible(const SkyViewFactorPayload& payload
     return payload.visible;
 }
 
-#endif // CUDA_AVAILABLE
+#endif // CUDA_AVAILABLE && OPTIX_AVAILABLE
 
 #endif //SKYVIEWFACTORRAYTRACING_H

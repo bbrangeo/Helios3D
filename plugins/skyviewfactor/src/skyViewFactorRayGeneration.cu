@@ -14,6 +14,9 @@
 */
 
 #include "SkyViewFactorRayTracing.h"
+
+// Only compile OptiX code if both CUDA and OptiX are available
+#if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
 #include <optix.h>
 #include <optixu/optixu_math_namespace.h>
 #include <optixu/optixu_matrix_namespace.h>
@@ -100,3 +103,5 @@ __device__ __forceinline__ bool isRayVisible(const SkyViewFactorPayload& payload
     // Ray is visible if it doesn't hit any obstacles
     return payload.visible;
 }
+
+#endif // CUDA_AVAILABLE && OPTIX_AVAILABLE

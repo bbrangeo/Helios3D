@@ -16,7 +16,7 @@ target_include_directories(skyviewfactor PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/inc
 find_package(OpenMP)
 if(OpenMP_CXX_FOUND)
     target_link_libraries(skyviewfactor PUBLIC OpenMP::OpenMP_CXX)
-    target_compile_definitions(skyviewfactor PRIVATE _OPENMP)
+    # _OPENMP is automatically defined by OpenMP, no need to define it manually
     message(STATUS "SkyViewFactor: OpenMP support enabled")
 else()
     message(STATUS "SkyViewFactor: OpenMP not found - using single-threaded implementation")

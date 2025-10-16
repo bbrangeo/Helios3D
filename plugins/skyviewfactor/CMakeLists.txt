@@ -227,6 +227,7 @@ if(CUDA_AVAILABLE)
             $<$<COMPILE_LANGUAGE:CXX>:CUDA_AVAILABLE>
             $<$<COMPILE_LANGUAGE:CXX>:OPTIX_AVAILABLE>
         )
+        message(STATUS "SkyViewFactor: Added CUDA_AVAILABLE and OPTIX_AVAILABLE definitions")
     else()
         target_compile_definitions(skyviewfactor PRIVATE 
             $<$<COMPILE_LANGUAGE:CUDA>:CUDA_AVAILABLE>
@@ -235,6 +236,13 @@ if(CUDA_AVAILABLE)
         target_compile_definitions(skyviewfactor PRIVATE 
             $<$<COMPILE_LANGUAGE:CXX>:CUDA_AVAILABLE>
         )
+        message(STATUS "SkyViewFactor: Added CUDA_AVAILABLE definition only")
+    endif()
+    
+    # Force set the definitions for debugging
+    target_compile_definitions(skyviewfactor PRIVATE CUDA_AVAILABLE)
+    if(OPTIX_AVAILABLE)
+        target_compile_definitions(skyviewfactor PRIVATE OPTIX_AVAILABLE)
     endif()
 
     # PTX compilation (only if OptiX is available)

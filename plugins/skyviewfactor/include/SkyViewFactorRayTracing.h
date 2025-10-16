@@ -20,9 +20,6 @@
 
 // Only include OptiX-specific code when CUDA and OptiX are available
 #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
-
-// Include OptiX headers
-#include <optix.h>
 // Launch parameters for sky view factor calculation
 rtDeclareVariable(rtObject, top_object, , );
 rtDeclareVariable(unsigned int, random_seed, , );
@@ -83,29 +80,19 @@ rtDeclareVariable(uint, num_rays, , );
 // Ray payload for sky view factor calculation is defined in SkyViewFactorRayTracing_Common.h
 
 // Ray generation program for sky view factor calculation
-RT_PROGRAM void skyViewFactorRayGeneration() {
-    // Implementation will be in .cu file
-}
+RT_PROGRAM void skyViewFactorRayGeneration();
 
 // Ray hit program for sky view factor calculation
-RT_PROGRAM void skyViewFactorRayHit() {
-    // Implementation will be in .cu file
-}
+RT_PROGRAM void skyViewFactorRayHit();
 
 // Ray miss program for sky view factor calculation
-RT_PROGRAM void skyViewFactorRayMiss() {
-    // Implementation will be in .cu file
-}
+RT_PROGRAM void skyViewFactorRayMiss();
 
 // Primitive intersection program for sky view factor calculation
-RT_PROGRAM void skyViewFactorPrimitiveIntersection(int primIdx) {
-    // Implementation will be in .cu file
-}
+RT_PROGRAM void skyViewFactorPrimitiveIntersection(int primIdx);
 
 // Bounding box program for sky view factor calculation
-RT_PROGRAM void skyViewFactorBoundingBox(int primIdx, float result[6]) {
-    // Implementation will be in .cu file
-}
+RT_PROGRAM void skyViewFactorBoundingBox(int primIdx, float result[6]);
 
 // Helper functions for sky view factor calculation are defined in SkyViewFactorRayTracing_Common.h
 //

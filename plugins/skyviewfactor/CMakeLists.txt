@@ -22,7 +22,7 @@ else()
     message(STATUS "SkyViewFactor: OpenMP not found - using single-threaded implementation")
 endif()
 
-# Initialize OptiX availability to false
+# Initialize OptiX availability to false (will be set by detection logic below)
 set(OPTIX_AVAILABLE FALSE)
 
 # Check if CUDA is available
@@ -187,6 +187,9 @@ endif()
 
 # CUDA sources and PTX compilation
 if(CUDA_AVAILABLE)
+    message(STATUS "SkyViewFactor: CUDA_AVAILABLE = ${CUDA_AVAILABLE}")
+    message(STATUS "SkyViewFactor: OPTIX_AVAILABLE = ${OPTIX_AVAILABLE}")
+    
     if(OPTIX_AVAILABLE)
         # Use OptiX-enabled sources
         set( CUDA_SOURCES
@@ -194,6 +197,7 @@ if(CUDA_AVAILABLE)
                 src/skyViewFactorRayHit.cu
                 src/skyViewFactorPrimitiveIntersection.cu
         )
+        message(STATUS "SkyViewFactor: Using OptiX-enabled CUDA sources")
     else()
         # Use empty sources when OptiX is not available
         set( CUDA_SOURCES
@@ -201,6 +205,7 @@ if(CUDA_AVAILABLE)
                 src/skyViewFactorRayHit_empty.cu
                 src/skyViewFactorPrimitiveIntersection_empty.cu
         )
+        message(STATUS "SkyViewFactor: Using empty CUDA sources (OptiX not available)")
     endif()
     
     # Add CUDA sources to the library target

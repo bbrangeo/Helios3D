@@ -239,10 +239,20 @@ if(CUDA_AVAILABLE)
         message(STATUS "SkyViewFactor: Added CUDA_AVAILABLE definition only")
     endif()
     
-    # Force set the definitions for debugging
+    # Force set the definitions for debugging - this ensures they are always available
     target_compile_definitions(skyviewfactor PRIVATE CUDA_AVAILABLE)
     if(OPTIX_AVAILABLE)
         target_compile_definitions(skyviewfactor PRIVATE OPTIX_AVAILABLE)
+    endif()
+    
+    # Set compile options for CUDA files to ensure proper macro definitions
+    set_target_properties(skyviewfactor PROPERTIES
+        CUDA_COMPILE_OPTIONS "-DCUDA_AVAILABLE"
+    )
+    if(OPTIX_AVAILABLE)
+        set_target_properties(skyviewfactor PROPERTIES
+            CUDA_COMPILE_OPTIONS "-DCUDA_AVAILABLE -DOPTIX_AVAILABLE"
+        )
     endif()
 
     # PTX compilation (only if OptiX is available)

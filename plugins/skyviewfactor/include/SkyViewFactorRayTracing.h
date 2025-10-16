@@ -108,4 +108,4 @@ RT_PROGRAM void skyViewFactorBoundingBox(int primIdx, float result[6]) {
 //
 //#endif // CUDA_AVAILABLE && OPTIX_AVAILABLE
 //
-//#endif //SKYVIEWFACTORRAYTRACING_H
+#endif //SKYVIEWFACTORRAYTRACING_H

@@ -210,6 +210,23 @@ if(CUDA_AVAILABLE)
     
     # Add CUDA sources to the library target
     target_sources(skyviewfactor PRIVATE ${CUDA_SOURCES})
+    
+    # Set CUDA-specific compile definitions
+    set_target_properties(skyviewfactor PROPERTIES
+        CUDA_SEPARABLE_COMPILATION ON
+    )
+    
+    # Add compile definitions for CUDA files
+    if(OPTIX_AVAILABLE)
+        target_compile_definitions(skyviewfactor PRIVATE 
+            $<$<COMPILE_LANGUAGE:CUDA>:CUDA_AVAILABLE>
+            $<$<COMPILE_LANGUAGE:CUDA>:OPTIX_AVAILABLE>
+        )
+    else()
+        target_compile_definitions(skyviewfactor PRIVATE 
+            $<$<COMPILE_LANGUAGE:CUDA>:CUDA_AVAILABLE>
+        )
+    endif()
 
     # PTX compilation (only if OptiX is available)
     if(OPTIX_AVAILABLE)

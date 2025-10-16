@@ -18,5 +18,10 @@
 // This file is used when OptiX is not available to provide empty implementations
 // The actual OptiX code is in skyViewFactorRayHit.cu but only compiled when OptiX is available
 
+// Only compile if CUDA is available but OptiX is not
+#if defined(CUDA_AVAILABLE) && !defined(OPTIX_AVAILABLE)
+
 // Empty implementations for when OptiX is not available
 // These functions will be called but do nothing
+
+#endif // CUDA_AVAILABLE && !OPTIX_AVAILABLE

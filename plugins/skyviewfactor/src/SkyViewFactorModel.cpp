@@ -22,6 +22,9 @@
 #include <sstream>
 #include <random>
 #include <algorithm>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 using namespace helios;
 
@@ -152,10 +155,23 @@ float SkyViewFactorModel::calculateSkyViewFactorCPU(const vec3& point) {
     std::vector<float> rayWeights;
     generateRays(point, rayDirections, rayWeights);
     
+    // Pre-cache primitive data to avoid repeated context calls
+    std::vector<uint> primitiveIDs = context->getAllUUIDs();
+    std::vector<std::vector<helios::vec3>> primitiveVertices;
+    primitiveVertices.reserve(primitiveIDs.size());
+    
+    for (uint primID : primitiveIDs) {
+        std::vector<helios::vec3> vertices = context->getPrimitiveVertices(primID);
+        primitiveVertices.push_back(vertices);
+    }
+    
     float totalWeight = 0.0f;
     float visibleWeight = 0.0f;
     
-    // Test each ray for visibility
+    // Parallelize ray testing with OpenMP
+    #ifdef _OPENMP
+    #pragma omp parallel for reduction(+:totalWeight,visibleWeight) schedule(dynamic)
+    #endif
     for (uint i = 0; i < rayDirections.size(); ++i) {
         vec3 rayDir = rayDirections[i];
         float weight = rayWeights[i];
@@ -166,12 +182,9 @@ float SkyViewFactorModel::calculateSkyViewFactorCPU(const vec3& point) {
         bool visible = true;
         float minDistance = maxRayLength;
         
-        // Get all primitives from context
-        std::vector<uint> primitiveIDs = context->getAllUUIDs();
-        
-        for (uint primID : primitiveIDs) {
-            // Get primitive vertices using the correct API
-            std::vector<helios::vec3> vertices = context->getPrimitiveVertices(primID);
+        // Test against all primitives
+        for (size_t j = 0; j < primitiveVertices.size(); ++j) {
+            const std::vector<helios::vec3>& vertices = primitiveVertices[j];
             if (vertices.empty()) continue;
             
             // Test ray-primitive intersection
@@ -260,14 +273,21 @@ float SkyViewFactorModel::calculateSkyViewFactor(const vec3& point) {
 std::vector<float> SkyViewFactorModel::calculateSkyViewFactors(const std::vector<vec3>& points) {
     skyViewFactors.clear();
     samplePoints = points;
+    skyViewFactors.resize(points.size());
     
     if (message_flag) {
         std::cout << "SkyViewFactorModel: Calculating sky view factors for " << points.size() << " points..." << std::endl;
+        #ifdef _OPENMP
+        std::cout << "SkyViewFactorModel: Using OpenMP with " << omp_get_max_threads() << " threads" << std::endl;
+        #endif
     }
     
-    for (const vec3& point : points) {
-        float svf = calculateSkyViewFactor(point);
-        skyViewFactors.push_back(svf);
+    // Parallelize calculation across multiple points
+    #ifdef _OPENMP
+    #pragma omp parallel for schedule(dynamic)
+    #endif
+    for (size_t i = 0; i < points.size(); ++i) {
+        skyViewFactors[i] = calculateSkyViewFactor(points[i]);
     }
     
     if (message_flag) {
@@ -280,7 +300,36 @@ std::vector<float> SkyViewFactorModel::calculateSkyViewFactors(const std::vector
 std::vector<float> SkyViewFactorModel::calculateSkyViewFactorsForPrimitives() {
     std::vector<uint> primitiveIDs = context->getAllUUIDs();
     std::vector<helios::vec3> points;
+    points.reserve(primitiveIDs.size());
     
+    // Parallelize primitive center calculation
+    #ifdef _OPENMP
+    #pragma omp parallel
+    {
+        std::vector<helios::vec3> local_points;
+        local_points.reserve(primitiveIDs.size() / omp_get_num_threads() + 1);
+        
+        #pragma omp for schedule(dynamic)
+        for (size_t i = 0; i < primitiveIDs.size(); ++i) {
+            uint primID = primitiveIDs[i];
+            // Get primitive vertices and calculate center
+            std::vector<helios::vec3> vertices = context->getPrimitiveVertices(primID);
+            if (!vertices.empty()) {
+                helios::vec3 center(0, 0, 0);
+                for (const auto& vertex : vertices) {
+                    center += vertex;
+                }
+                center = center / static_cast<float>(vertices.size());
+                local_points.push_back(center);
+            }
+        }
+        
+        #pragma omp critical
+        {
+            points.insert(points.end(), local_points.begin(), local_points.end());
+        }
+    }
+    #else
     for (uint primID : primitiveIDs) {
         // Get primitive vertices and calculate center
         std::vector<helios::vec3> vertices = context->getPrimitiveVertices(primID);
@@ -293,6 +342,7 @@ std::vector<float> SkyViewFactorModel::calculateSkyViewFactorsForPrimitives() {
             points.push_back(center);
         }
     }
+    #endif
     
     return calculateSkyViewFactors(points);
 }

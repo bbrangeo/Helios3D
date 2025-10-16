@@ -12,8 +12,18 @@ add_library(skyviewfactor STATIC "src/SkyViewFactorModel.cpp" "src/SkyViewFactor
 
 target_include_directories(skyviewfactor PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
+# Find OpenMP
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(skyviewfactor PUBLIC OpenMP::OpenMP_CXX)
+    target_compile_definitions(skyviewfactor PRIVATE _OPENMP)
+    message(STATUS "SkyViewFactor: OpenMP support enabled")
+else()
+    message(STATUS "SkyViewFactor: OpenMP not found - using single-threaded implementation")
+endif()
+
 # Initialize OptiX availability to false
-set(OPTIX_AVAILABLE TRUE)
+set(OPTIX_AVAILABLE FALSE)
 
 # Check if CUDA is available
 find_package(CUDAToolkit QUIET)

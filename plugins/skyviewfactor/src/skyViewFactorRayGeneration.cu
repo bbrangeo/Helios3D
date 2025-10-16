@@ -102,10 +102,5 @@ RT_PROGRAM void skyViewFactorRayGeneration() {
     ray_visibility[rayIndex] = payload.visible;
 }
 
-// Helper function to check if ray is visible
-__device__ __forceinline__ bool isRayVisible(const SkyViewFactorPayload& payload) {
-    // Ray is visible if it doesn't hit any obstacles
-    return payload.visible;
-}
 
 #endif // CUDA_AVAILABLE && OPTIX_AVAILABLE

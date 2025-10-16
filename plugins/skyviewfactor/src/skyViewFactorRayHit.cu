@@ -25,6 +25,7 @@
 
 using namespace optix;
 
+
 // Ray hit program for sky view factor calculation
 RT_PROGRAM void skyViewFactorRayHit() {
     // Get hit information

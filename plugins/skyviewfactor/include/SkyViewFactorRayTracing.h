@@ -19,7 +19,7 @@
 #include "SkyViewFactorRayTracing_Common.h"
 
 //// Only include OptiX-specific code when CUDA and OptiX are available
-//#if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
+#if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
 // Launch parameters for sky view factor calculation
 rtDeclareVariable(rtObject, top_object, , );
 rtDeclareVariable(unsigned int, random_seed, , );
@@ -106,6 +106,6 @@ RT_PROGRAM void skyViewFactorBoundingBox(int primIdx, float result[6]) {
 
 // Helper functions for sky view factor calculation are defined in SkyViewFactorRayTracing_Common.h
 //
-//#endif // CUDA_AVAILABLE && OPTIX_AVAILABLE
-//
+#endif // CUDA_AVAILABLE && OPTIX_AVAILABLE
+
 #endif //SKYVIEWFACTORRAYTRACING_H

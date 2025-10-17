@@ -1,4 +1,4 @@
-/** \file "SkyViewFactorRayTracing.h" Header file for sky view factor ray tracing functionality.
+/** \file "SkyViewFactorRayTracing.h" OptiX ray tracing structures for sky view factor calculation.
 
     Copyright (C) 2025 Boris Dufour
 
@@ -16,90 +16,67 @@
 #ifndef SKYVIEWFACTORRAYTRACING_H
 #define SKYVIEWFACTORRAYTRACING_H
 
-#include "SkyViewFactorRayTracing_Common.h"
-
-// Only include OptiX-specific code when CUDA and OptiX are available
+// Only include OptiX headers if both CUDA and OptiX are available
 #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
 
-// Include OptiX headers to define macros
 #include <optix.h>
+#include <optixu/optixu_math_namespace.h>
+#include <optixu/optixu_vector_types.h>
 
-// Launch parameters for sky view factor calculation
-rtDeclareVariable(rtObject, top_object, , );
-rtDeclareVariable(unsigned int, random_seed, , );
-rtDeclareVariable(unsigned int, launch_offset, , );
-rtDeclareVariable(unsigned int, launch_face, , );
-rtDeclareVariable(unsigned int, Nrays_launch, , );
-rtDeclareVariable(unsigned int, Nrays_global, , );
-rtBuffer<bool, 1> ray_launch_flag;
+using namespace optix;
 
-// Ray types for sky view factor calculation
-rtDeclareVariable(unsigned int, skyview_ray_type, , );
+// Ray types
+enum RayType {
+    skyview_ray_type = 0,
+    num_ray_types
+};
 
-rtDeclareVariable(uint3, launch_index, rtLaunchIndex, );
-rtDeclareVariable(uint3, launch_dim, rtLaunchDim, );
+// Payload structure for sky view factor ray tracing
+struct SkyViewFactorPayload {
+    bool visible;
+    float distance;
+    unsigned int primitiveID;
+    float3 hit_point;
+    float3 normal;
+    float weight;
+};
 
-// Sky view factor specific buffers
-rtBuffer<float3, 1> ray_origins;             ///< Ray origin points
-rtBuffer<float3, 1> ray_directions;          ///< Ray direction vectors
-rtBuffer<float, 1> ray_weights;              ///< Ray weights (cos²(θ))
-rtBuffer<bool, 1> ray_visibility;            ///< Ray visibility results
-rtBuffer<float, 1> sky_view_factors;         ///< Calculated sky view factors
+// Launch parameters structure
+struct SkyViewFactorLaunchParams {
+    // Ray data
+    float3* ray_origins;
+    float3* ray_directions;
+    float* ray_weights;
+    bool* ray_visibility;
+    
+    // Scene data
+    OptixTraversableHandle top_object;
+    
+    // Ray generation parameters
+    float3 sample_point;
+    unsigned int Nrays_launch;
+    float max_ray_length;
+    unsigned int random_seed;
+    
+    // Ray type
+    unsigned int skyview_ray_type;
+};
 
-// Primitive data buffers
-rtBuffer<float3, 1> primitive_vertices;      ///< Primitive vertex data
-rtBuffer<uint3, 1> primitive_triangles;      ///< Primitive triangle indices
-rtBuffer<uint, 1> primitive_materials;       ///< Primitive material IDs
-rtBuffer<uint, 1> primitive_primitiveIDs;    ///< Primitive IDs
+// Declare launch parameters as global variable
+extern "C" __constant__ SkyViewFactorLaunchParams launch_params;
 
-// Texture-related buffers (inherited from radiation plugin)
-rtBuffer<bool, 3> maskdata;
-rtBuffer<int2, 1> masksize;
-rtBuffer<int, 1> maskID;
-rtBuffer<float2, 2> uvdata;
-rtBuffer<int, 1> uvID;
-rtBuffer<float3, 2> normaldata;
-rtBuffer<int, 1> normalID;
-rtBuffer<float3, 2> colordata;
-rtBuffer<int, 1> colorID;
-rtBuffer<float, 2> alphadata;
-rtBuffer<int, 1> alphaID;
-rtBuffer<float, 2> roughnessdata;
-rtBuffer<int, 1> roughnessID;
-rtBuffer<float, 2> transmittancedata;
-rtBuffer<int, 1> transmittanceID;
+// Ray generation program declaration
+extern "C" __global__ void skyViewFactorRayGeneration();
 
-// Material properties
-rtBuffer<float3, 1> material_diffuse;
-rtBuffer<float3, 1> material_specular;
-rtBuffer<float, 1> material_roughness;
-rtBuffer<float, 1> material_transmittance;
-rtBuffer<float, 1> material_emission;
+// Closest hit program declaration
+extern "C" __global__ void skyViewFactorClosestHit();
 
-// Sky view factor calculation parameters
-rtDeclareVariable(float, max_ray_length, , );
-rtDeclareVariable(float3, sample_point, , );
-rtDeclareVariable(uint, num_rays, , );
+// Miss program declaration
+extern "C" __global__ void skyViewFactorMiss();
 
-// Ray payload for sky view factor calculation is defined in SkyViewFactorRayTracing_Common.h
+// Any hit program declaration
+extern "C" __global__ void skyViewFactorAnyHit();
 
-// Ray generation program for sky view factor calculation
-RT_PROGRAM void skyViewFactorRayGeneration();
-
-// Ray hit program for sky view factor calculation
-RT_PROGRAM void skyViewFactorRayHit();
-
-// Ray miss program for sky view factor calculation
-RT_PROGRAM void skyViewFactorRayMiss();
-
-// Primitive intersection program for sky view factor calculation
-RT_PROGRAM void skyViewFactorPrimitiveIntersection(int primIdx);
-
-// Bounding box program for sky view factor calculation
-RT_PROGRAM void skyViewFactorBoundingBox(int primIdx, float result[6]);
-
-// Helper functions for sky view factor calculation are defined in SkyViewFactorRayTracing_Common.h
-//
 #endif // CUDA_AVAILABLE && OPTIX_AVAILABLE
 
-#endif //SKYVIEWFACTORRAYTRACING_H
+#endif // SKYVIEWFACTORRAYTRACING_H

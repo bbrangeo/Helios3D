@@ -190,32 +190,22 @@ if(CUDA_AVAILABLE)
     message(STATUS "SkyViewFactor: CUDA_AVAILABLE = ${CUDA_AVAILABLE}")
     message(STATUS "SkyViewFactor: OPTIX_AVAILABLE = ${OPTIX_AVAILABLE}")
     
-    # Force use of empty sources for now to avoid OptiX compilation issues
-    # TODO: Fix OptiX compilation and re-enable when working
-    set( CUDA_SOURCES
-            src/skyViewFactorRayGeneration_empty.cu
-            src/skyViewFactorRayHit_empty.cu
-            src/skyViewFactorPrimitiveIntersection_empty.cu
-    )
-    message(STATUS "SkyViewFactor: Using empty CUDA sources (OptiX compilation temporarily disabled)")
-    
-    # if(OPTIX_AVAILABLE)
-    #     # Use OptiX-enabled sources
-    #     set( CUDA_SOURCES
-    #             src/skyViewFactorRayGeneration.cu
-    #             src/skyViewFactorRayHit.cu
-    #             src/skyViewFactorPrimitiveIntersection.cu
-    #     )
-    #     message(STATUS "SkyViewFactor: Using OptiX-enabled CUDA sources")
-    # else()
-    #     # Use empty sources when OptiX is not available
-    #     set( CUDA_SOURCES
-    #             src/skyViewFactorRayGeneration_empty.cu
-    #             src/skyViewFactorRayHit_empty.cu
-    #             src/skyViewFactorPrimitiveIntersection_empty.cu
-    #     )
-    #     message(STATUS "SkyViewFactor: Using empty CUDA sources (OptiX not available)")
-    # endif()
+    if(OPTIX_AVAILABLE)
+        # Use OptiX-enabled sources
+        set( CUDA_SOURCES
+                src/skyViewFactorRayGeneration.cu
+                src/skyViewFactorPrograms.cu
+        )
+        message(STATUS "SkyViewFactor: Using OptiX-enabled CUDA sources")
+    else()
+        # Use empty sources when OptiX is not available
+        set( CUDA_SOURCES
+                src/skyViewFactorRayGeneration_empty.cu
+                src/skyViewFactorRayHit_empty.cu
+                src/skyViewFactorPrimitiveIntersection_empty.cu
+        )
+        message(STATUS "SkyViewFactor: Using empty CUDA sources (OptiX not available)")
+    endif()
     
     # Add CUDA sources to the library target
     target_sources(skyviewfactor PRIVATE ${CUDA_SOURCES})

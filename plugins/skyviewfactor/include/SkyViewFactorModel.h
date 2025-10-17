@@ -64,6 +64,8 @@ namespace helios {
         void* optix_module;                  ///< OptiX module
         void* optix_program_groups;          ///< OptiX program groups
         void* optix_pipeline;                ///< OptiX pipeline
+        void* optix_gas;                     ///< OptiX geometry acceleration structure
+        void* optix_sbt;                     ///< OptiX shader binding table
         
         // Ray generation data
         void* ray_generation_data;           ///< Data for ray generation
@@ -75,6 +77,13 @@ namespace helios {
         void generateRays(const vec3& point, std::vector<vec3>& rayDirections, std::vector<float>& rayWeights); ///< Generate rays for SVF calculation
         float calculateSkyViewFactorGPU(const vec3& point); ///< GPU-based SVF calculation
         float calculateSkyViewFactorOptimized(const vec3& point, const std::vector<std::vector<helios::vec3>>& primitiveVertices); ///< Optimized CPU-based SVF calculation
+        
+        // OptiX helper methods
+        void createOptiXProgramGroups();     ///< Create OptiX program groups
+        void createOptiXPipeline();          ///< Create OptiX pipeline
+        void createOptiXAccelerationStructures(); ///< Create OptiX acceleration structures
+        const char* getSkyViewFactorPTXCode(); ///< Get PTX code for sky view factor
+        size_t getSkyViewFactorPTXSize();    ///< Get PTX code size
         
     public:
         

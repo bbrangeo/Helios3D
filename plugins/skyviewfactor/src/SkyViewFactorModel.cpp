@@ -277,16 +277,28 @@ float SkyViewFactorModel::calculateSkyViewFactor(const vec3& point) {
     }
 }
 
-std::vector<float> SkyViewFactorModel::calculateSkyViewFactors(const std::vector<vec3>& points) {
+std::vector<float> SkyViewFactorModel::calculateSkyViewFactors(const std::vector<vec3>& points, int num_threads) {
     // Pre-allocate result vector
     std::vector<float> results;
     results.reserve(points.size());
     results.resize(points.size());
     
+    // Determine number of threads to use
+    int actual_threads = num_threads;
+    if (actual_threads <= 0) {
+        #ifdef _OPENMP
+        actual_threads = std::min(omp_get_max_threads(), 8);
+        #else
+        actual_threads = 1;
+        #endif
+    }
+    
     if (message_flag) {
         std::cout << "SkyViewFactorModel: Calculating sky view factors for " << points.size() << " points..." << std::endl;
         #ifdef _OPENMP
-        std::cout << "SkyViewFactorModel: Using OpenMP with " << omp_get_max_threads() << " threads" << std::endl;
+        std::cout << "SkyViewFactorModel: Using OpenMP with " << actual_threads << " threads" << std::endl;
+        #else
+        std::cout << "SkyViewFactorModel: Using single-threaded implementation" << std::endl;
         #endif
     }
     
@@ -303,7 +315,7 @@ std::vector<float> SkyViewFactorModel::calculateSkyViewFactors(const std::vector
     
     // Parallelize calculation across multiple points with thread-safe approach
     #ifdef _OPENMP
-    #pragma omp parallel for schedule(static) num_threads(omp_get_max_threads()-1)
+    #pragma omp parallel for schedule(static) num_threads(actual_threads)
     #endif
     for (size_t i = 0; i < points.size(); ++i) {
         try {
@@ -325,8 +337,7 @@ std::vector<float> SkyViewFactorModel::calculateSkyViewFactors(const std::vector
     return results;
 }
 
-std::vector<float> SkyViewFactorModel::calculateSkyViewFactorsForPrimitives() {
-    std::vector<uint> primitiveIDs = context->getAllUUIDs();
+std::vector<float> SkyViewFactorModel::calculateSkyViewFactorsForPrimitives(std::vector<uint> primitiveIDs, int num_threads) {
     std::vector<helios::vec3> points;
     points.reserve(primitiveIDs.size());
     
@@ -349,7 +360,7 @@ std::vector<float> SkyViewFactorModel::calculateSkyViewFactorsForPrimitives() {
         }
     }
     
-    return calculateSkyViewFactors(points);
+    return calculateSkyViewFactors(points, num_threads);
 }
 
 void SkyViewFactorModel::setRayCount(uint N) {
@@ -388,6 +399,10 @@ bool SkyViewFactorModel::isOptiXAvailable() const {
 
 std::vector<float> SkyViewFactorModel::getSkyViewFactors() const {
     return skyViewFactors;
+}
+
+std::vector<vec3> SkyViewFactorModel::getSamplePoints() const {
+    return samplePoints;
 }
 
 bool SkyViewFactorModel::exportSkyViewFactors(const std::string& filename) const {

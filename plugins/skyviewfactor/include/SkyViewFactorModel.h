@@ -100,14 +100,15 @@ namespace helios {
         
         /** \brief Calculate sky view factors for multiple points
          * \param points Vector of 3D points
+         * \param num_threads Number of OpenMP threads to use (0 = auto)
          * \return Vector of sky view factor values
          */
-        std::vector<float> calculateSkyViewFactors(const std::vector<vec3>& points);
+        std::vector<float> calculateSkyViewFactors(const std::vector<vec3>& points, int num_threads = 0);
         
         /** \brief Calculate sky view factor for all primitive centers
          * \return Vector of sky view factor values for each primitive
          */
-        std::vector<float> calculateSkyViewFactorsForPrimitives();
+        std::vector<float> calculateSkyViewFactorsForPrimitives(std::vector<unsigned int> primitiveIDs, int num_threads = 0);
         
         /** \brief Set the number of rays for SVF calculation
          * \param N Number of rays to use
@@ -148,6 +149,11 @@ namespace helios {
          * \return Vector of sky view factor values
          */
         std::vector<float> getSkyViewFactors() const;
+        
+        /** \brief Get the last calculated sample points
+         * \return Vector of sample points
+         */
+        std::vector<vec3> getSamplePoints() const;
         
         /** \brief Export sky view factors to file
          * \param filename Output filename

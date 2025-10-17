@@ -107,7 +107,8 @@ bool testPrimitiveCenters() {
     SkyViewFactorModel svfModel(&context);
     
     // Calculate SVF for primitive centers
-    std::vector<float> svfs = svfModel.calculateSkyViewFactorsForPrimitives();
+    std::vector<uint> primitiveIDs = context.getAllUUIDs();
+    std::vector<float> svfs = svfModel.calculateSkyViewFactorsForPrimitives(primitiveIDs);
     
     std::cout << "  Calculated SVFs for " << svfs.size() << " primitive centers:" << std::endl;
     for (uint i = 0; i < svfs.size(); ++i) {

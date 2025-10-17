@@ -74,6 +74,7 @@ namespace helios {
         void cleanupOptiX();                 ///< Clean up OptiX resources
         void generateRays(const vec3& point, std::vector<vec3>& rayDirections, std::vector<float>& rayWeights); ///< Generate rays for SVF calculation
         float calculateSkyViewFactorGPU(const vec3& point); ///< GPU-based SVF calculation
+        float calculateSkyViewFactorOptimized(const vec3& point, const std::vector<std::vector<helios::vec3>>& primitiveVertices); ///< Optimized CPU-based SVF calculation
         
     public:
         

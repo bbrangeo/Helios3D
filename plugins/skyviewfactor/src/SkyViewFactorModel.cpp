@@ -446,6 +446,9 @@ SkyViewFactorModel::SkyViewFactorModel(Context* context_a) {
     skyViewFactors.clear();
     samplePoints.clear();
     
+    // Initialize force CPU flag (default: false - use GPU when available)
+    force_cpu = false;
+    
     // Try to initialize OptiX if available
     if (optix_flag) {
         try {
@@ -1213,6 +1216,17 @@ bool SkyViewFactorModel::isOptiXAvailable() const {
     return optix_flag;
 }
 
+void SkyViewFactorModel::setForceCPU(bool force) {
+    force_cpu = force;
+    if (message_flag) {
+        std::cout << "SkyViewFactorModel: Force CPU flag set to " << (force ? "true" : "false") << std::endl;
+    }
+}
+
+bool SkyViewFactorModel::getForceCPU() const {
+    return force_cpu;
+}
+
 std::vector<float> SkyViewFactorModel::getSkyViewFactors() const {
     return skyViewFactors;
 }
@@ -1300,6 +1314,7 @@ std::string SkyViewFactorModel::getStatistics() const {
     oss << "  Max ray length: " << maxRayLength << std::endl;
     oss << "  CUDA available: " << (cuda_flag ? "Yes" : "No") << std::endl;
     oss << "  OptiX available: " << (optix_flag ? "Yes" : "No") << std::endl;
+    oss << "  Force CPU: " << (force_cpu ? "Yes" : "No") << std::endl;
     oss << "  Calculated points: " << skyViewFactors.size() << std::endl;
     
     if (!skyViewFactors.empty()) {

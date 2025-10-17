@@ -19,11 +19,18 @@
 // Only include OptiX headers if both CUDA and OptiX are available
 #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
 
+// Suppress deprecated warnings from OptiX headers
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
+// Include OptiX headers first to avoid conflicts
 #include <optix.h>
 #include <optixu/optixu_math_namespace.h>
 #include <optixu/optixu_vector_types.h>
 
-using namespace optix;
+#pragma GCC diagnostic pop
+
+// Don't use 'using namespace optix' to avoid conflicts with CUDA types
 
 // Ray types
 enum RayType {
@@ -31,29 +38,21 @@ enum RayType {
     num_ray_types
 };
 
-// Payload structure for sky view factor ray tracing
-struct SkyViewFactorPayload {
-    bool visible;
-    float distance;
-    unsigned int primitiveID;
-    float3 hit_point;
-    float3 normal;
-    float weight;
-};
+// SkyViewFactorPayload is defined in SkyViewFactorRayTracing_Common.h
 
 // Launch parameters structure
 struct SkyViewFactorLaunchParams {
     // Ray data
-    float3* ray_origins;
-    float3* ray_directions;
+    float* ray_origins;      // 3 floats per ray (x, y, z)
+    float* ray_directions;   // 3 floats per ray (x, y, z)
     float* ray_weights;
     bool* ray_visibility;
     
     // Scene data
-    OptixTraversableHandle top_object;
+    void* top_object;  // OptixTraversableHandle as void* to avoid compilation issues
     
     // Ray generation parameters
-    float3 sample_point;
+    float sample_point[3];   // 3 floats (x, y, z)
     unsigned int Nrays_launch;
     float max_ray_length;
     unsigned int random_seed;

@@ -49,6 +49,7 @@ namespace helios {
         // OptiX/CUDA related
         bool cuda_flag;                      ///< Flag indicating if CUDA is available
         bool optix_flag;                     ///< Flag indicating if OptiX is available
+        bool force_cpu;                      ///< Flag to force CPU OpenMP even when GPU is available
         
         // Ray generation parameters
         float maxRayLength;                  ///< Maximum ray length for intersection testing
@@ -66,6 +67,9 @@ namespace helios {
         void* optix_pipeline;                ///< OptiX pipeline
         void* optix_gas;                     ///< OptiX geometry acceleration structure
         void* optix_sbt;                     ///< OptiX shader binding table
+        void* optix_raygen_group;            ///< OptiX ray generation program group
+        void* optix_miss_group;              ///< OptiX miss program group
+        void* optix_hitgroup_group;          ///< OptiX hit group program group
         
         // Ray generation data
         void* ray_generation_data;           ///< Data for ray generation
@@ -154,6 +158,16 @@ namespace helios {
          */
         bool isOptiXAvailable() const;
         
+        /** \brief Set force CPU flag
+         * \param force True to force CPU OpenMP, false to use GPU when available
+         */
+        void setForceCPU(bool force);
+        
+        /** \brief Get force CPU flag
+         * \return True if CPU is forced, false otherwise
+         */
+        bool getForceCPU() const;
+        
         /** \brief Get the last calculated sky view factors
          * \return Vector of sky view factor values
          */
@@ -163,6 +177,14 @@ namespace helios {
          * \return Vector of sample points
          */
         std::vector<vec3> getSamplePoints() const;
+        
+        /** \brief Test if a ray intersects with a primitive
+         * \param rayOrigin Origin of the ray
+         * \param rayDirection Direction of the ray
+         * \param primitive Vertices of the primitive (triangle)
+         * \return True if ray intersects primitive
+         */
+        bool rayIntersectsPrimitive(const vec3& rayOrigin, const vec3& rayDirection, const std::vector<vec3>& primitive);
         
         /** \brief Export sky view factors to file
          * \param filename Output filename

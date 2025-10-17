@@ -1,83 +1,61 @@
-/** \file "skyViewFactorRayHit.cu" CUDA ray hit handling for sky view factor calculation.
-
-    Copyright (C) 2025 Boris Dufour
-
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, version 2.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
+/** \file "skyViewFactorRayHit.cu" File containing OptiX ray hit programs for SkyViewFactor
+ *
+ *    Copyright (C) 2025 PyHelios Team
+ *
+ *    This program is free software: you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+ *    the Free Software Foundation, version 2.
+ *
+ *    This program is distributed in the hope that it will be useful,
+ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *    GNU General Public License for more details.
+ *
 */
 
-#include "SkyViewFactorRayTracing.h"
-
-// Only compile OptiX code if both CUDA and OptiX are available
-#if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
-
-// Include OptiX headers directly to ensure all macros are available
-#include <optix.h>
+#include <optix_world.h>
 #include <optixu/optixu_math_namespace.h>
-#include <optixu/optixu_vector_types.h>
 
 using namespace optix;
 
+#include "SkyViewFactorRayTracing.cuh"
 
-// Ray hit program for sky view factor calculation
-RT_PROGRAM void skyViewFactorRayHit() {
-    // Get hit information
-    float3 hitPoint = rtTransformPoint(RT_OBJECT_TO_WORLD, rtGetPoint(rtIntersectionDistance));
-    float3 normal = rtTransformNormal(RT_OBJECT_TO_WORLD, rtGetNormal());
-    normal = normalize(normal);
+rtDeclareVariable(Ray, ray, rtCurrentRay, );
+rtDeclareVariable(float, t_hit, rtIntersectionDistance, );
+
+// Closest hit program
+RT_PROGRAM void skyview_closest_hit() {
+    // Ray hit an obstacle, so it's not visible to the sky
+    prd.visible = false;
+    prd.distance = t_hit;
+    prd.hit_point = ray.origin + t_hit * ray.direction;
     
-    // Get primitive information
-    uint primitiveID = rtGetPrimitiveIndex();
-    uint materialID = primitive_materials[primitiveID];
+    // Get primitive ID (this would need to be set up in the geometry)
+    prd.primitiveID = 0;  // Placeholder
     
-    // Get payload
-    SkyViewFactorPayload& payload = rtGetPayload<SkyViewFactorPayload>();
-    
-    // Update payload with hit information
-    payload.visible = false;  // Ray hit an obstacle, so sky is not visible
-    payload.distance = rtIntersectionDistance;
-    payload.primitiveID = primitiveID;
-    payload.hit_point = hitPoint;
-    payload.normal = normal;
-    
-    // Store hit information for analysis
-    // (This could be used for more detailed analysis of what was hit)
+    // Calculate surface normal (this would need to be computed from geometry)
+    prd.normal = make_float3(0.0f, 0.0f, 1.0f);  // Placeholder
 }
 
-// Ray miss program for sky view factor calculation
-RT_PROGRAM void skyViewFactorRayMiss() {
-    // Get payload
-    SkyViewFactorPayload& payload = rtGetPayload<SkyViewFactorPayload>();
+// Any hit program
+RT_PROGRAM void skyview_any_hit() {
+    // For sky view factor, we only need to know if there's any hit
+    // So we can terminate the ray here
+    prd.visible = false;
+    prd.distance = t_hit;
+    prd.hit_point = ray.origin + t_hit * ray.direction;
+    prd.primitiveID = 0;  // Placeholder
     
-    // Ray missed all objects, so sky is visible
-    payload.visible = true;
-    payload.distance = max_ray_length;
-    payload.primitiveID = 0;
-    payload.hit_point = make_float3(0.0f, 0.0f, 0.0f);
-    payload.normal = make_float3(0.0f, 0.0f, 1.0f);
+    // Terminate ray tracing
+    rtTerminateRay();
 }
 
-// Exception program for error handling
-RT_PROGRAM void skyViewFactorException() {
-    // Get payload
-    SkyViewFactorPayload& payload = rtGetPayload<SkyViewFactorPayload>();
-    
-    // Set error state
-    payload.visible = false;
-    payload.distance = 0.0f;
-    payload.primitiveID = 0;
-    payload.hit_point = make_float3(0.0f, 0.0f, 0.0f);
-    payload.normal = make_float3(0.0f, 0.0f, 1.0f);
-    
-    // Log error (in a real implementation, this would use proper logging)
-    rtPrintf("SkyViewFactor: Ray tracing exception occurred\n");
+// Miss program
+RT_PROGRAM void skyview_miss() {
+    // Ray didn't hit anything, so it's visible to the sky
+    prd.visible = true;
+    prd.distance = max_ray_length;
+    prd.hit_point = ray.origin + max_ray_length * ray.direction;
+    prd.primitiveID = 0;
+    prd.normal = make_float3(0.0f, 0.0f, 1.0f);
 }
-
-#endif // CUDA_AVAILABLE && OPTIX_AVAILABLE

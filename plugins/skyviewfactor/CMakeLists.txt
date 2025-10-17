@@ -192,10 +192,11 @@ if(CUDA_AVAILABLE)
     
     if(OPTIX_AVAILABLE)
         # Use OptiX-enabled sources
-        set( CUDA_SOURCES
-                src/skyViewFactorRayGeneration.cu
-                src/skyViewFactorPrograms.cu
-        )
+set( CUDA_SOURCES
+		src/skyViewFactorRayGeneration.cu
+		src/skyViewFactorRayHit.cu
+		src/skyViewFactorPrimitiveIntersection.cu
+)
         message(STATUS "SkyViewFactor: Using OptiX-enabled CUDA sources")
     else()
         # Use empty sources when OptiX is not available
@@ -213,6 +214,12 @@ if(CUDA_AVAILABLE)
     # Set CUDA-specific compile definitions
     set_target_properties(skyviewfactor PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON
+    )
+    
+    # Suppress deprecated warnings from OptiX headers
+    target_compile_options(skyviewfactor PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-deprecated-declarations>
+        $<$<COMPILE_LANGUAGE:CUDA>:-Wno-deprecated-declarations>
     )
     
     # Add compile definitions for CUDA files
@@ -263,6 +270,7 @@ if(CUDA_AVAILABLE)
         set(OPTIX_NVCC_FLAGS
             --ptx
             --use_fast_math
+            -Wno-deprecated-declarations
             -I${CMAKE_CURRENT_SOURCE_DIR}/include
         )
         

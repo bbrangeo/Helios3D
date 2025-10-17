@@ -449,10 +449,10 @@ SkyViewFactorModel::SkyViewFactorModel(Context* context_a) {
     skyViewFactors.clear();
     samplePoints.clear();
     
-    // Try to initialize OptiX if available
-    if (optix_flag) {
+    // Try to initialize OptiX if available and not forcing CPU
+    if (optix_flag && !force_cpu) {
         try {
-            initializeOptiX();
+            // initializeOptiX();
             if (message_flag) {
                 std::cout << "SkyViewFactorModel: OptiX initialized successfully" << std::endl;
             }
@@ -464,6 +464,11 @@ SkyViewFactorModel::SkyViewFactorModel(Context* context_a) {
             optix_flag = false;
             cuda_flag = false;
         }
+    } else if (force_cpu) {
+        if (message_flag) {
+            std::cout << "SkyViewFactorModel: Force CPU enabled - skipping OptiX initialization" << std::endl;
+        }
+        optix_flag = false; // Ensure OptiX is disabled when forcing CPU
     }
 }
 
@@ -473,7 +478,7 @@ SkyViewFactorModel::~SkyViewFactorModel() {
 
 void SkyViewFactorModel::initializeOptiX() {
     #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
-        try {
+        /*try {
             // Create OptiX context
             OptixDeviceContextOptions contextOptions = {};
             contextOptions.logCallbackFunction = nullptr;
@@ -534,8 +539,7 @@ void SkyViewFactorModel::initializeOptiX() {
         }
     #else
         if (message_flag) {
-            std::cout << "SkyViewFactorModel: OptiX not available at compile time" << std::endl;
-        }
+          */
     #endif
 }
 
@@ -553,7 +557,7 @@ void SkyViewFactorModel::cleanupOptiX() {
 
 void SkyViewFactorModel::createOptiXProgramGroups() {
     #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
-        try {
+        /*try {
             if (message_flag) {
                 std::cout << "SkyViewFactorModel: Creating OptiX program groups..." << std::endl;
             }
@@ -605,13 +609,13 @@ void SkyViewFactorModel::createOptiXProgramGroups() {
                 std::cout << "SkyViewFactorModel: Failed to create program groups: " << e.what() << std::endl;
             }
             throw;
-        }
+        }*/
     #endif
 }
 
 void SkyViewFactorModel::createOptiXPipeline() {
     #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
-        try {
+        /*try {
             if (message_flag) {
                 std::cout << "SkyViewFactorModel: Creating OptiX pipeline..." << std::endl;
             }
@@ -662,13 +666,13 @@ void SkyViewFactorModel::createOptiXPipeline() {
                 std::cout << "SkyViewFactorModel: Failed to create pipeline: " << e.what() << std::endl;
             }
             throw;
-        }
+        }*/
     #endif
 }
 
 void SkyViewFactorModel::createOptiXAccelerationStructures() {
     #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
-        try {
+        /*try {
             if (message_flag) {
                 std::cout << "SkyViewFactorModel: Creating OptiX acceleration structures..." << std::endl;
             }
@@ -782,7 +786,7 @@ void SkyViewFactorModel::createOptiXAccelerationStructures() {
                 std::cout << "SkyViewFactorModel: Failed to create acceleration structures: " << e.what() << std::endl;
             }
             throw;
-        }
+        }*/
     #endif
 }
 
@@ -969,8 +973,8 @@ float SkyViewFactorModel::calculateSkyViewFactorGPU(const vec3& point) {
         try {
           
             // Initialize OptiX if not already done
-            if (!optix_flag) {
-                initializeOptiX();
+            if (!optix_flag && !force_cpu) {
+                // initializeOptiX();
                 if (!optix_flag) {
                     if (message_flag) {
                         std::cout << "SkyViewFactorModel: OptiX initialization failed, falling back to CPU" << std::endl;
@@ -1223,9 +1227,37 @@ bool SkyViewFactorModel::isOptiXAvailable() const {
 }
 
 void SkyViewFactorModel::setForceCPU(bool force) {
+    bool old_force_cpu = force_cpu;
     force_cpu = force;
+    
     if (message_flag) {
         std::cout << "SkyViewFactorModel: Force CPU flag set to " << (force ? "true" : "false") << std::endl;
+    }
+    
+    // If switching from GPU to CPU, disable OptiX
+    if (force && !old_force_cpu) {
+        if (message_flag) {
+            std::cout << "SkyViewFactorModel: Disabling OptiX due to force CPU flag" << std::endl;
+        }
+        optix_flag = false;
+    }
+    // If switching from CPU to GPU, try to reinitialize OptiX (if available)
+    else if (!force && old_force_cpu && cuda_flag) {
+        if (message_flag) {
+            std::cout << "SkyViewFactorModel: Attempting to reinitialize OptiX..." << std::endl;
+        }
+        try {
+            // initializeOptiX();
+            if (message_flag) {
+                std::cout << "SkyViewFactorModel: OptiX reinitialized successfully" << std::endl;
+            }
+        } catch (const std::exception& e) {
+            if (message_flag) {
+                std::cout << "SkyViewFactorModel: OptiX reinitialization failed: " << e.what() << std::endl;
+                std::cout << "SkyViewFactorModel: Staying with CPU implementation" << std::endl;
+            }
+            optix_flag = false;
+        }
     }
 }
 

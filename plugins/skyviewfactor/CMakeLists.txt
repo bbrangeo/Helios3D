@@ -190,23 +190,24 @@ if(CUDA_AVAILABLE)
     message(STATUS "SkyViewFactor: CUDA_AVAILABLE = ${CUDA_AVAILABLE}")
     message(STATUS "SkyViewFactor: OPTIX_AVAILABLE = ${OPTIX_AVAILABLE}")
     
-    if(OPTIX_AVAILABLE)
-        # Use OptiX-enabled sources
-set( CUDA_SOURCES
-		src/skyViewFactorRayGeneration.cu
-		src/skyViewFactorRayHit.cu
-		src/skyViewFactorPrimitiveIntersection.cu
-)
-        message(STATUS "SkyViewFactor: Using OptiX-enabled CUDA sources")
-    else()
+    # Force use of empty sources to avoid OptiX compilation issues
+    # if(OPTIX_AVAILABLE)
+    #     # Use OptiX-enabled sources
+    # set( CUDA_SOURCES
+    #         src/skyViewFactorRayGeneration.cu
+    #         src/skyViewFactorRayHit.cu
+    #         src/skyViewFactorPrimitiveIntersection.cu
+    # )
+    #     message(STATUS "SkyViewFactor: Using OptiX-enabled CUDA sources")
+    # else()
         # Use empty sources when OptiX is not available
         set( CUDA_SOURCES
                 src/skyViewFactorRayGeneration_empty.cu
                 src/skyViewFactorRayHit_empty.cu
                 src/skyViewFactorPrimitiveIntersection_empty.cu
         )
-        message(STATUS "SkyViewFactor: Using empty CUDA sources (OptiX not available)")
-    endif()
+        message(STATUS "SkyViewFactor: Using empty CUDA sources (OptiX compilation disabled)")
+    # endif()
     
     # Add CUDA sources to the library target
     target_sources(skyviewfactor PRIVATE ${CUDA_SOURCES})
@@ -222,19 +223,19 @@ set( CUDA_SOURCES
         $<$<COMPILE_LANGUAGE:CUDA>:-Wno-deprecated-declarations>
     )
     
-    # Add compile definitions for CUDA files
-    if(OPTIX_AVAILABLE)
-        target_compile_definitions(skyviewfactor PRIVATE 
-            $<$<COMPILE_LANGUAGE:CUDA>:CUDA_AVAILABLE>
-            $<$<COMPILE_LANGUAGE:CUDA>:OPTIX_AVAILABLE>
-        )
-        # Also add to C++ files for conditional compilation
-        target_compile_definitions(skyviewfactor PRIVATE 
-            $<$<COMPILE_LANGUAGE:CXX>:CUDA_AVAILABLE>
-            $<$<COMPILE_LANGUAGE:CXX>:OPTIX_AVAILABLE>
-        )
-        message(STATUS "SkyViewFactor: Added CUDA_AVAILABLE and OPTIX_AVAILABLE definitions")
-    else()
+    # Add compile definitions for CUDA files - OPTIX_AVAILABLE disabled
+    # if(OPTIX_AVAILABLE)
+    #     target_compile_definitions(skyviewfactor PRIVATE 
+    #         $<$<COMPILE_LANGUAGE:CUDA>:CUDA_AVAILABLE>
+    #         $<$<COMPILE_LANGUAGE:CUDA>:OPTIX_AVAILABLE>
+    #     )
+    #     # Also add to C++ files for conditional compilation
+    #     target_compile_definitions(skyviewfactor PRIVATE 
+    #         $<$<COMPILE_LANGUAGE:CXX>:CUDA_AVAILABLE>
+    #         $<$<COMPILE_LANGUAGE:CXX>:OPTIX_AVAILABLE>
+    #     )
+    #     message(STATUS "SkyViewFactor: Added CUDA_AVAILABLE and OPTIX_AVAILABLE definitions")
+    # else()
         target_compile_definitions(skyviewfactor PRIVATE 
             $<$<COMPILE_LANGUAGE:CUDA>:CUDA_AVAILABLE>
         )
@@ -242,14 +243,14 @@ set( CUDA_SOURCES
         target_compile_definitions(skyviewfactor PRIVATE 
             $<$<COMPILE_LANGUAGE:CXX>:CUDA_AVAILABLE>
         )
-        message(STATUS "SkyViewFactor: Added CUDA_AVAILABLE definition only")
-    endif()
+        message(STATUS "SkyViewFactor: Added CUDA_AVAILABLE definition only (OPTIX_AVAILABLE disabled)")
+    # endif()
     
     # Force set the definitions for debugging - this ensures they are always available
     target_compile_definitions(skyviewfactor PRIVATE CUDA_AVAILABLE)
-    if(OPTIX_AVAILABLE)
-        target_compile_definitions(skyviewfactor PRIVATE OPTIX_AVAILABLE)
-    endif()
+    # if(OPTIX_AVAILABLE)
+    #     target_compile_definitions(skyviewfactor PRIVATE OPTIX_AVAILABLE)
+    # endif()
     
     # Set compile options for CUDA files to ensure proper macro definitions
     set_target_properties(skyviewfactor PROPERTIES
@@ -261,8 +262,8 @@ set( CUDA_SOURCES
         )
     endif()
 
-    # PTX compilation (only if OptiX is available)
-    if(OPTIX_AVAILABLE)
+    # PTX compilation (only if OptiX is available) - DISABLED
+    if(FALSE AND OPTIX_AVAILABLE)
         # OptiX-specific PTX compilation using direct nvcc calls
         # OptiX requires special compilation with OptiX headers and runtime support
 

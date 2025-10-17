@@ -303,7 +303,7 @@ std::vector<float> SkyViewFactorModel::calculateSkyViewFactors(const std::vector
     
     // Parallelize calculation across multiple points with thread-safe approach
     #ifdef _OPENMP
-    #pragma omp parallel for schedule(static) num_threads(std::min(omp_get_max_threads(), 8))
+    #pragma omp parallel for schedule(static) num_threads((omp_get_max_threads()-1)
     #endif
     for (size_t i = 0; i < points.size(); ++i) {
         try {

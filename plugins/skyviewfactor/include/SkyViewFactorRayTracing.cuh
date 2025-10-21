@@ -54,11 +54,11 @@ rtBuffer<unsigned int, 1> primitive_type;
 // Result buffer for sky view factor
 rtBuffer<float, 1> sky_view_factor_result;
 
-// OptiX 6.5.0 ray tracing context variables
-rtDeclareVariable(optix::Ray, ray, rtCurrentRay, );
-rtDeclareVariable(float, t_hit, rtIntersectionDistance, );
-rtDeclareVariable(unsigned int, primitiveIndex, attribute primitiveIndex, );
-rtDeclareVariable(PerRayData, prd, rtPayload, );
+// OptiX 6.5.0 ray tracing context variables - declared locally in each CUDA file
+// rtDeclareVariable(optix::Ray, ray, rtCurrentRay, );
+// rtDeclareVariable(float, t_hit, rtIntersectionDistance, );
+// rtDeclareVariable(unsigned int, primitiveIndex, attribute primitiveIndex, );
+// rtDeclareVariable(PerRayData, prd, rtPayload, );
 
 // Helper functions for ray generation
 __device__ __forceinline__ unsigned int tea(unsigned int val0, unsigned int val1) {

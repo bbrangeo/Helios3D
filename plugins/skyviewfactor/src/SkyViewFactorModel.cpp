@@ -42,21 +42,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
-// Avoid problematic CUDA headers and define everything manually
-// This approach works on both systems with and without CUDA
-
-// Define all CUDA types manually to avoid header conflicts
-typedef struct cudaChannelFormatDesc {
-    int x, y, z, w;
-    int f;
-} cudaChannelFormatDesc;
-
-typedef int cudaError_t;
-typedef int cudaMemcpyKind;
-
-#define cudaSuccess 0
-#define cudaMemcpyHostToDevice 1
-#define cudaMemcpyDeviceToHost 2
+// CUDA types are now properly included via OptiX headers
 
 // CUDA function pointers for runtime linking
 typedef cudaError_t (*cudaMalloc_t)(void** devPtr, size_t size);

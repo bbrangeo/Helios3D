@@ -64,8 +64,7 @@ RT_PROGRAM void skyview_any_hit() {
     prd.hit_point = ray.origin + t_hit * ray.direction;
     prd.primitiveID = UUID;
     
-    // Terminate ray tracing using OptiX 5.1.0 API
-    rtTerminateRay();
+    // No need to terminate ray explicitly - let it continue
 }
 
 // Miss program

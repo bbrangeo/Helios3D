@@ -13,7 +13,7 @@
  *
 */
 
-#include <optix_world.h>
+#include <optix.h>
 #include "SkyViewFactorRayTracing.cuh"
 
 using namespace optix;

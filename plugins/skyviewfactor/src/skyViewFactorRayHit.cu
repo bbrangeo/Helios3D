@@ -30,10 +30,10 @@ RT_PROGRAM void skyview_closest_hit() {
     prd.distance = t_hit;
     prd.hit_point = ray.origin + t_hit * ray.direction;
     
-    // Get primitive ID (this would need to be set up in the geometry)
-    prd.primitiveID = 0;  // Placeholder
+    // Get primitive ID from geometry
+    prd.primitiveID = rtGetPrimitiveIndex();
     
-    // Calculate surface normal (this would need to be computed from geometry)
+    // Calculate surface normal (simplified - would need proper geometry data)
     prd.normal = make_float3(0.0f, 0.0f, 1.0f);  // Placeholder
 }
 
@@ -44,7 +44,7 @@ RT_PROGRAM void skyview_any_hit() {
     prd.visible = false;
     prd.distance = t_hit;
     prd.hit_point = ray.origin + t_hit * ray.direction;
-    prd.primitiveID = 0;  // Placeholder
+    prd.primitiveID = rtGetPrimitiveIndex();
     
     // Terminate ray tracing
     rtTerminateRay();

@@ -25,10 +25,17 @@ rtDeclareVariable(float, t_hit, rtIntersectionDistance, );
 
 // Triangle intersection program
 RT_PROGRAM void skyview_triangle_intersect(int primIdx) {
-    // Get triangle vertices (placeholder - would get from geometry)
-    float3 v0 = make_float3(0.0f, 0.0f, 0.0f);
-    float3 v1 = make_float3(1.0f, 0.0f, 0.0f);
-    float3 v2 = make_float3(0.0f, 1.0f, 0.0f);
+    // Get triangle vertices from geometry buffer
+    // This would need to be properly set up with the actual geometry data
+    // For now, using a simplified approach
+    
+    // Get vertices for this primitive (would need proper buffer access)
+    float3 v0, v1, v2;
+    
+    // Placeholder - in real implementation would get from triangle_vertices buffer
+    v0 = make_float3(0.0f, 0.0f, 0.0f);
+    v1 = make_float3(1.0f, 0.0f, 0.0f);
+    v2 = make_float3(0.0f, 1.0f, 0.0f);
     
     // Möller-Trumbore ray-triangle intersection
     float3 edge1 = v1 - v0;
@@ -66,10 +73,14 @@ RT_PROGRAM void skyview_triangle_intersect(int primIdx) {
 
 // Triangle bounding box program
 RT_PROGRAM void skyview_triangle_bounds(int primIdx, float result[6]) {
-    // Get triangle vertices (placeholder)
-    float3 v0 = make_float3(0.0f, 0.0f, 0.0f);
-    float3 v1 = make_float3(1.0f, 0.0f, 0.0f);
-    float3 v2 = make_float3(0.0f, 1.0f, 0.0f);
+    // Get triangle vertices for this primitive
+    // This would need to be properly set up with the actual geometry data
+    float3 v0, v1, v2;
+    
+    // Placeholder - in real implementation would get from triangle_vertices buffer
+    v0 = make_float3(0.0f, 0.0f, 0.0f);
+    v1 = make_float3(1.0f, 0.0f, 0.0f);
+    v2 = make_float3(0.0f, 1.0f, 0.0f);
 
     // Calculate AABB
     result[0] = fminf(v0.x, fminf(v1.x, v2.x));

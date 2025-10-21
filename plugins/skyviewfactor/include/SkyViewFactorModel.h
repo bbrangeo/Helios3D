@@ -59,21 +59,42 @@ namespace helios {
         std::vector<float> skyViewFactors;   ///< Storage for calculated sky view factors
         std::vector<vec3> samplePoints;      ///< Points where SVF is calculated
         
-        // CUDA/OptiX buffers and contexts
-        void* cuda_context;                  ///< CUDA context
-        void* optix_context;                 ///< OptiX context
-        void* optix_module;                  ///< OptiX module
-        void* optix_program_groups;          ///< OptiX program groups
-        void* optix_pipeline;                ///< OptiX pipeline
-        void* optix_gas;                     ///< OptiX geometry acceleration structure
-        void* optix_sbt;                     ///< OptiX shader binding table
-        void* optix_raygen_group;            ///< OptiX ray generation program group
-        void* optix_miss_group;              ///< OptiX miss program group
-        void* optix_hitgroup_group;          ///< OptiX hit group program group
+        // OptiX context and programs
+        RTcontext OptiX_Context;             ///< OptiX context
+        RTprogram skyview_raygen;            ///< Ray generation program
+        RTprogram skyview_miss;              ///< Miss program
+        RTprogram skyview_closest_hit;       ///< Closest hit program
+        RTprogram skyview_any_hit;           ///< Any hit program
+        RTprogram skyview_triangle_intersect; ///< Triangle intersection program
+        RTprogram skyview_triangle_bounds;   ///< Triangle bounding box program
         
-        // Ray generation data
-        void* ray_generation_data;           ///< Data for ray generation
-        void* primitive_data;                ///< Primitive data for intersection testing
+        // OptiX geometry and acceleration structures
+        RTgeometrygroup geometry_group;      ///< Geometry group
+        RTacceleration geometry_acceleration; ///< Geometry acceleration structure
+        RTgeometry triangle_geometry;        ///< Triangle geometry
+        RTgeometry patch_geometry;           ///< Patch geometry
+        RTgeometry disk_geometry;            ///< Disk geometry
+        
+        // OptiX buffers for geometry data
+        RTbuffer triangle_vertices_RTbuffer; ///< Triangle vertices buffer
+        RTbuffer triangle_UUID_RTbuffer;     ///< Triangle UUID buffer
+        RTbuffer patch_vertices_RTbuffer;    ///< Patch vertices buffer
+        RTbuffer patch_UUID_RTbuffer;        ///< Patch UUID buffer
+        RTbuffer disk_centers_RTbuffer;      ///< Disk centers buffer
+        RTbuffer disk_radii_RTbuffer;        ///< Disk radii buffer
+        RTbuffer disk_normals_RTbuffer;      ///< Disk normals buffer
+        RTbuffer disk_UUID_RTbuffer;         ///< Disk UUID buffer
+        
+        // OptiX variables
+        RTvariable top_object;               ///< Top-level object
+        RTvariable sample_point_var;         ///< Sample point variable
+        RTvariable ray_count_var;            ///< Ray count variable
+        RTvariable max_ray_length_var;       ///< Max ray length variable
+        RTvariable skyview_ray_type;         ///< Ray type variable
+        
+        // Geometry state tracking
+        bool geometry_dirty;                 ///< Flag indicating geometry needs update
+        bool isgeometryinitialized;          ///< Flag indicating OptiX geometry is initialized
         
         // Private methods
         void initializeOptiX();              ///< Initialize OptiX context and modules
@@ -81,13 +102,10 @@ namespace helios {
         void generateRays(const vec3& point, std::vector<vec3>& rayDirections, std::vector<float>& rayWeights); ///< Generate rays for SVF calculation
         float calculateSkyViewFactorGPU(const vec3& point); ///< GPU-based SVF calculation
         float calculateSkyViewFactorOptimized(const vec3& point, const std::vector<std::vector<helios::vec3>>& primitiveVertices); ///< Optimized CPU-based SVF calculation
-        
-        // OptiX helper methods
-        void createOptiXProgramGroups();     ///< Create OptiX program groups
-        void createOptiXPipeline();          ///< Create OptiX pipeline
-        void createOptiXAccelerationStructures(); ///< Create OptiX acceleration structures
-        const char* getSkyViewFactorPTXCode(); ///< Get PTX code for sky view factor
-        size_t getSkyViewFactorPTXSize();    ///< Get PTX code size
+        std::vector<float> calculateSkyViewFactorsGPUBatch(const std::vector<vec3>& points); ///< GPU batch processing for multiple points
+        void updateOptiXGeometry();          ///< Update OptiX geometry from Helios context
+        void createOptiXGeometry();          ///< Create OptiX geometry from Helios primitives
+        void addBuffer(const char* name, RTbuffer& buffer, RTvariable& variable, RTbuffertype type, RTformat format, int dimension); ///< Helper to add OptiX buffers
         
     public:
         

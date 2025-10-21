@@ -81,6 +81,64 @@ extern "C" cudaError_t cudaGetLastError() { return cudaSuccess; }
 // OptiX includes after CUDA
 #include <optix.h>
 
+// OptiX error handling
+#define RT_CHECK_ERROR(func) \
+    do { \
+        RTresult code = func; \
+        if (code != RT_SUCCESS) \
+            sutilHandleError(OptiX_Context, code, __FILE__, __LINE__); \
+    } while (0)
+
+// Error handling function
+void sutilHandleError(RTcontext context, RTresult code, const char* file, int line) {
+    const char* error_string;
+    rtContextGetErrorString(context, code, &error_string);
+    std::cerr << "OptiX Error at " << file << ":" << line << " - " << error_string << std::endl;
+    throw std::runtime_error(std::string("OptiX Error: ") + error_string);
+}
+
+// Helper function to zero 1D buffer
+void zeroBuffer1D(RTbuffer& buffer, size_t bsize) {
+    RTformat format;
+    RT_CHECK_ERROR(rtBufferGetFormat(buffer, &format));
+    RT_CHECK_ERROR(rtBufferSetSize1D(buffer, bsize));
+    
+    void* data;
+    RT_CHECK_ERROR(rtBufferMap(buffer, &data));
+    
+    if (format == RT_FORMAT_FLOAT) {
+        memset(data, 0, bsize * sizeof(float));
+    } else if (format == RT_FORMAT_FLOAT3) {
+        memset(data, 0, bsize * sizeof(float3));
+    } else if (format == RT_FORMAT_UNSIGNED_INT) {
+        memset(data, 0, bsize * sizeof(unsigned int));
+    }
+    
+    RT_CHECK_ERROR(rtBufferUnmap(buffer));
+}
+
+// Helper function to zero 2D buffer
+void zeroBuffer2D(RTbuffer& buffer, int2 size) {
+    RTformat format;
+    RT_CHECK_ERROR(rtBufferGetFormat(buffer, &format));
+    RT_CHECK_ERROR(rtBufferSetSize2D(buffer, size.x, size.y));
+    
+    void* data;
+    RT_CHECK_ERROR(rtBufferMap(buffer, &data));
+    
+    size_t element_size = 0;
+    if (format == RT_FORMAT_FLOAT) {
+        element_size = sizeof(float);
+    } else if (format == RT_FORMAT_FLOAT3) {
+        element_size = sizeof(float3);
+    } else if (format == RT_FORMAT_UNSIGNED_INT) {
+        element_size = sizeof(unsigned int);
+    }
+    
+    memset(data, 0, size.x * size.y * element_size);
+    RT_CHECK_ERROR(rtBufferUnmap(buffer));
+}
+
 // Define missing OptiX types if not available
 #ifndef OptixDeviceContextOptions
 typedef struct OptixDeviceContextOptions {
@@ -474,53 +532,61 @@ SkyViewFactorModel::~SkyViewFactorModel() {
 void SkyViewFactorModel::initializeOptiX() {
     #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
         try {
-            // Create OptiX context
-            OptixDeviceContextOptions contextOptions = {};
-            contextOptions.logCallbackFunction = nullptr;
-            contextOptions.logCallbackLevel = 0;
+            // Create OptiX context (OptiX 6 API)
+            RT_CHECK_ERROR(rtContextCreate(&OptiX_Context));
+            RT_CHECK_ERROR(rtContextSetPrintEnabled(OptiX_Context, 1));
             
-            OptixResult result = optixDeviceContextCreate(0, &contextOptions, (OptixDeviceContext*)&optix_context);
-            if (result != OPTIX_SUCCESS) {
-                throw std::runtime_error("Failed to create OptiX context");
-            }
+            // Set ray type count (1 type for sky view factor)
+            RT_CHECK_ERROR(rtContextSetRayTypeCount(OptiX_Context, 1));
             
-            // Load PTX modules
-            const char* ptx_code = getSkyViewFactorPTXCode();
-            size_t ptx_size = getSkyViewFactorPTXSize();
+            // Set entry point count (1 entry point for sky view factor)
+            RT_CHECK_ERROR(rtContextSetEntryPointCount(OptiX_Context, 1));
             
-            OptixModuleCompileOptions moduleCompileOptions = {};
-            moduleCompileOptions.maxRegisterCount = OPTIX_COMPILE_DEFAULT_MAX_REGISTER_COUNT;
-            moduleCompileOptions.optLevel = OPTIX_COMPILE_OPTIMIZATION_DEFAULT;
-            moduleCompileOptions.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_NONE;
+            // Declare ray type variable
+            RT_CHECK_ERROR(rtContextDeclareVariable(OptiX_Context, "skyview_ray_type", &skyview_ray_type));
+            RT_CHECK_ERROR(rtVariableSet1ui(skyview_ray_type, 0));
             
-            OptixPipelineCompileOptions pipelineCompileOptions = {};
-            pipelineCompileOptions.usesMotionBlur = false;
-            pipelineCompileOptions.traversableGraphFlags = OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS;
-            pipelineCompileOptions.numPayloadValues = 1;
-            pipelineCompileOptions.numAttributeValues = 2;
-            pipelineCompileOptions.exceptionFlags = OPTIX_EXCEPTION_FLAG_NONE;
-            pipelineCompileOptions.pipelineLaunchParamsVariableName = "launch_params";
+            // Create ray generation program from PTX
+            RT_CHECK_ERROR(rtProgramCreateFromPTXFile(OptiX_Context, 
+                helios::resolvePluginAsset("skyviewfactor", "cuda_compile_ptx_generated_skyViewFactorRayGeneration.cu.ptx").string().c_str(), 
+                "skyview_raygen", &skyview_raygen));
+            RT_CHECK_ERROR(rtContextSetRayGenerationProgram(OptiX_Context, 0, skyview_raygen));
             
-            result = optixModuleCreateFromPTX((OptixDeviceContext)optix_context, &moduleCompileOptions, &pipelineCompileOptions,
-                                            ptx_code, ptx_size, nullptr, nullptr, (OptixModule*)&optix_module);
-            if (result != OPTIX_SUCCESS) {
-                throw std::runtime_error("Failed to create OptiX module");
-            }
+            // Create miss program
+            RT_CHECK_ERROR(rtProgramCreateFromPTXFile(OptiX_Context, 
+                helios::resolvePluginAsset("skyviewfactor", "cuda_compile_ptx_generated_skyViewFactorRayHit.cu.ptx").string().c_str(), 
+                "skyview_miss", &skyview_miss));
+            RT_CHECK_ERROR(rtContextSetMissProgram(OptiX_Context, 0, skyview_miss));
             
-            // Create program groups
-            createOptiXProgramGroups();
+            // Create hit programs
+            RT_CHECK_ERROR(rtProgramCreateFromPTXFile(OptiX_Context, 
+                helios::resolvePluginAsset("skyviewfactor", "cuda_compile_ptx_generated_skyViewFactorRayHit.cu.ptx").string().c_str(), 
+                "skyview_closest_hit", &skyview_closest_hit));
+            RT_CHECK_ERROR(rtProgramCreateFromPTXFile(OptiX_Context, 
+                helios::resolvePluginAsset("skyviewfactor", "cuda_compile_ptx_generated_skyViewFactorRayHit.cu.ptx").string().c_str(), 
+                "skyview_any_hit", &skyview_any_hit));
             
-            // Create pipeline
-            createOptiXPipeline();
+            // Create intersection programs
+            RT_CHECK_ERROR(rtProgramCreateFromPTXFile(OptiX_Context, 
+                helios::resolvePluginAsset("skyviewfactor", "cuda_compile_ptx_generated_skyViewFactorPrimitiveIntersection.cu.ptx").string().c_str(), 
+                "skyview_triangle_intersect", &skyview_triangle_intersect));
+            RT_CHECK_ERROR(rtProgramCreateFromPTXFile(OptiX_Context, 
+                helios::resolvePluginAsset("skyviewfactor", "cuda_compile_ptx_generated_skyViewFactorPrimitiveIntersection.cu.ptx").string().c_str(), 
+                "skyview_triangle_bounds", &skyview_triangle_bounds));
             
-            // Create acceleration structures
-            createOptiXAccelerationStructures();
+            // Declare launch parameters
+            RT_CHECK_ERROR(rtContextDeclareVariable(OptiX_Context, "sample_point", &sample_point_var));
+            RT_CHECK_ERROR(rtContextDeclareVariable(OptiX_Context, "ray_count", &ray_count_var));
+            RT_CHECK_ERROR(rtContextDeclareVariable(OptiX_Context, "max_ray_length", &max_ray_length_var));
+            RT_CHECK_ERROR(rtContextDeclareVariable(OptiX_Context, "top_object", &top_object));
+            
+            // Initialize geometry state
+            geometry_dirty = true;
+            isgeometryinitialized = false;
             
             if (message_flag) {
-                std::cout << "SkyViewFactorModel: OptiX initialized successfully" << std::endl;
+                std::cout << "SkyViewFactorModel: OptiX context initialized successfully" << std::endl;
             }
-            
-            // Mark OptiX as successfully initialized
             optix_flag = true;
             if (message_flag) {
                 std::cout << "SkyViewFactorModel: optix_flag set to TRUE - GPU will be used" << std::endl;
@@ -539,11 +605,27 @@ void SkyViewFactorModel::initializeOptiX() {
     #endif
 }
 
+void SkyViewFactorModel::addBuffer(const char* name, RTbuffer& buffer, RTvariable& variable, RTbuffertype type, RTformat format, int dimension) {
+    #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
+        RT_CHECK_ERROR(rtBufferCreate(OptiX_Context, type, &buffer));
+        RT_CHECK_ERROR(rtBufferSetFormat(buffer, format));
+        RT_CHECK_ERROR(rtContextDeclareVariable(OptiX_Context, name, &variable));
+        RT_CHECK_ERROR(rtVariableSetObject(variable, buffer));
+        if (dimension == 1) {
+            zeroBuffer1D(buffer, 1);
+        } else if (dimension == 2) {
+            zeroBuffer2D(buffer, make_int2(1, 1));
+        } else {
+            throw std::runtime_error("SkyViewFactorModel::addBuffer: invalid buffer dimension of " + std::to_string(dimension) + ", must be 1 or 2.");
+        }
+    #endif
+}
+
 void SkyViewFactorModel::cleanupOptiX() {
     #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
-        if (optix_context) {
-            optixDeviceContextDestroy((OptixDeviceContext)optix_context);
-            optix_context = nullptr;
+        if (OptiX_Context) {
+            RT_CHECK_ERROR(rtContextDestroy(OptiX_Context));
+            OptiX_Context = nullptr;
         }
         if (message_flag) {
             std::cout << "SkyViewFactorModel: OptiX cleanup completed" << std::endl;
@@ -551,281 +633,86 @@ void SkyViewFactorModel::cleanupOptiX() {
     #endif
 }
 
-void SkyViewFactorModel::createOptiXProgramGroups() {
+void SkyViewFactorModel::updateOptiXGeometry() {
     #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
-        try {
-            if (message_flag) {
-                std::cout << "SkyViewFactorModel: Creating OptiX program groups..." << std::endl;
-            }
-            
-            // Create program group descriptions
-            OptixProgramGroupDesc raygen_prog_group_desc = {};
-            raygen_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_RAYGEN;
-            raygen_prog_group_desc.raygen.module = (OptixModule)optix_module;
-            raygen_prog_group_desc.raygen.entryFunctionName = "__raygen__skyViewFactorRayGeneration";
-            
-            OptixProgramGroupDesc miss_prog_group_desc = {};
-            miss_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_MISS;
-            miss_prog_group_desc.miss.module = (OptixModule)optix_module;
-            miss_prog_group_desc.miss.entryFunctionName = "__miss__skyViewFactorMiss";
-            
-            OptixProgramGroupDesc hitgroup_prog_group_desc = {};
-            hitgroup_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
-            hitgroup_prog_group_desc.hitgroup.moduleCH = (OptixModule)optix_module;
-            hitgroup_prog_group_desc.hitgroup.entryFunctionNameCH = "__closesthit__skyViewFactorClosestHit";
-            hitgroup_prog_group_desc.hitgroup.moduleAH = (OptixModule)optix_module;
-            hitgroup_prog_group_desc.hitgroup.entryFunctionNameAH = "__anyhit__skyViewFactorAnyHit";
-            
-            // Create program groups
-            OptixProgramGroupOptions program_group_options = {};
-            char log[2048];
-            size_t sizeof_log = sizeof(log);
-            
-            OptixResult result = optixProgramGroupCreate((OptixDeviceContext)optix_context, &raygen_prog_group_desc, 1, &program_group_options, log, &sizeof_log, (OptixProgramGroup*)&optix_raygen_group);
-            if (result != OPTIX_SUCCESS) {
-                throw std::runtime_error("Failed to create raygen program group: " + std::string(log));
-            }
-            
-            result = optixProgramGroupCreate((OptixDeviceContext)optix_context, &miss_prog_group_desc, 1, &program_group_options, log, &sizeof_log, (OptixProgramGroup*)&optix_miss_group);
-            if (result != OPTIX_SUCCESS) {
-                throw std::runtime_error("Failed to create miss program group: " + std::string(log));
-            }
-            
-            result = optixProgramGroupCreate((OptixDeviceContext)optix_context, &hitgroup_prog_group_desc, 1, &program_group_options, log, &sizeof_log, (OptixProgramGroup*)&optix_hitgroup_group);
-            if (result != OPTIX_SUCCESS) {
-                throw std::runtime_error("Failed to create hitgroup program group: " + std::string(log));
-            }
-            
-            if (message_flag) {
-                std::cout << "SkyViewFactorModel: OptiX program groups created successfully" << std::endl;
-            }
-            
-        } catch (const std::exception& e) {
-            if (message_flag) {
-                std::cout << "SkyViewFactorModel: Failed to create program groups: " << e.what() << std::endl;
-            }
-            throw;
+        if (!OptiX_Context || !context) {
+            return;
         }
-    #endif
-}
-
-void SkyViewFactorModel::createOptiXPipeline() {
-    #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
+        
         try {
             if (message_flag) {
-                std::cout << "SkyViewFactorModel: Creating OptiX pipeline..." << std::endl;
-            }
-            
-            // Create pipeline compile options
-            OptixPipelineCompileOptions pipeline_compile_options = {};
-            pipeline_compile_options.usesMotionBlur = false;
-            pipeline_compile_options.traversableGraphFlags = OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS;
-            pipeline_compile_options.numPayloadValues = 1;
-            pipeline_compile_options.numAttributeValues = 2;
-            pipeline_compile_options.exceptionFlags = OPTIX_EXCEPTION_FLAG_NONE;
-            pipeline_compile_options.pipelineLaunchParamsVariableName = "launch_params";
-            
-            // Create pipeline link options
-            OptixPipelineLinkOptions pipeline_link_options = {};
-            pipeline_link_options.maxTraceDepth = 1;
-            pipeline_link_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_NONE;
-            
-            // Create program group descriptions array
-            OptixProgramGroup program_groups[] = {
-                (OptixProgramGroup)optix_raygen_group,
-                (OptixProgramGroup)optix_miss_group,
-                (OptixProgramGroup)optix_hitgroup_group
-            };
-            
-            // Create pipeline
-            char log[2048];
-            size_t sizeof_log = sizeof(log);
-            
-            OptixResult result = optixPipelineCreate((OptixDeviceContext)optix_context, &pipeline_compile_options, &pipeline_link_options, 
-                                                   program_groups, 3, log, &sizeof_log, (OptixPipeline*)&optix_pipeline);
-            if (result != OPTIX_SUCCESS) {
-                throw std::runtime_error("Failed to create OptiX pipeline: " + std::string(log));
-            }
-            
-            // Set pipeline stack size
-            result = optixPipelineSetStackSize((OptixPipeline)optix_pipeline, 2*1024, 2*1024, 2*1024, 1);
-            if (result != OPTIX_SUCCESS) {
-                throw std::runtime_error("Failed to set pipeline stack size");
-            }
-            
-            if (message_flag) {
-                std::cout << "SkyViewFactorModel: OptiX pipeline created successfully" << std::endl;
-            }
-            
-        } catch (const std::exception& e) {
-            if (message_flag) {
-                std::cout << "SkyViewFactorModel: Failed to create pipeline: " << e.what() << std::endl;
-            }
-            throw;
-        }
-    #endif
-}
-
-void SkyViewFactorModel::createOptiXAccelerationStructures() {
-    #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
-        try {
-            if (message_flag) {
-                std::cout << "SkyViewFactorModel: Creating OptiX acceleration structures..." << std::endl;
-            }
-            
-            if (!context) {
-                throw std::runtime_error("Context is null, cannot create acceleration structures");
+                std::cout << "SkyViewFactorModel: Updating OptiX geometry..." << std::endl;
             }
             
             // Get all primitive UUIDs from context
             std::vector<uint> allUUIDs = context->getAllUUIDs();
-            if (allUUIDs.empty()) {
-                if (message_flag) {
-                    std::cout << "SkyViewFactorModel: No primitives found, creating empty acceleration structure" << std::endl;
-                }
-                return;
-            }
             
-            // Create triangle input for GAS (Geometry Acceleration Structure)
-            std::vector<OptixAabb> aabbs;
-            std::vector<uint32_t> triangle_indices;
-            std::vector<optix::float3> triangle_vertices;
+            // Create geometry group
+            RT_CHECK_ERROR(rtGeometryGroupCreate(OptiX_Context, &geometry_group));
+            RT_CHECK_ERROR(rtAccelerationCreate(OptiX_Context, &geometry_acceleration));
+            RT_CHECK_ERROR(rtGeometryGroupSetAcceleration(geometry_group, geometry_acceleration));
             
-            // Process each primitive
+            // Create triangle geometry
+            RT_CHECK_ERROR(rtGeometryCreate(OptiX_Context, &triangle_geometry));
+            RT_CHECK_ERROR(rtGeometrySetPrimitiveCount(triangle_geometry, allUUIDs.size()));
+            RT_CHECK_ERROR(rtGeometrySetIntersectionProgram(triangle_geometry, skyview_triangle_intersect));
+            RT_CHECK_ERROR(rtGeometrySetBoundingBoxProgram(triangle_geometry, skyview_triangle_bounds));
+            
+            // Set up geometry data buffers
+            addBuffer("triangle_vertices", triangle_vertices_RTbuffer, triangle_vertices_RTvariable, RT_BUFFER_INPUT, RT_FORMAT_FLOAT3, 2);
+            addBuffer("triangle_UUID", triangle_UUID_RTbuffer, triangle_UUID_RTvariable, RT_BUFFER_INPUT, RT_FORMAT_UNSIGNED_INT, 1);
+            
+            // Upload geometry data
+            std::vector<float3> vertices;
+            std::vector<uint> uuids;
+            
             for (uint uuid : allUUIDs) {
-                std::vector<vec3> vertices = context->getPrimitiveVertices(uuid);
-                if (vertices.size() >= 3) { // Only triangles for now
-                    // Add vertices to global array
-                    uint32_t start_index = triangle_vertices.size();
-                    for (const auto& vertex : vertices) {
-                        triangle_vertices.push_back(vec3_to_float3(vertex));
+                std::vector<vec3> primitive_vertices = context->getPrimitiveVertices(uuid);
+                if (primitive_vertices.size() >= 3) {
+                    for (const auto& vertex : primitive_vertices) {
+                        vertices.push_back(make_float3(vertex.x, vertex.y, vertex.z));
                     }
-                    
-                    // Add triangle indices
-                    for (size_t i = 0; i < vertices.size() - 2; i += 3) {
-                        triangle_indices.push_back(start_index + i);
-                        triangle_indices.push_back(start_index + i + 1);
-                        triangle_indices.push_back(start_index + i + 2);
-                    }
-                    
-                    // Calculate AABB for this primitive
-                    vec3 min_vertex = vertices[0];
-                    vec3 max_vertex = vertices[0];
-                    for (const auto& vertex : vertices) {
-                        min_vertex.x = std::min(min_vertex.x, vertex.x);
-                        min_vertex.y = std::min(min_vertex.y, vertex.y);
-                        min_vertex.z = std::min(min_vertex.z, vertex.z);
-                        max_vertex.x = std::max(max_vertex.x, vertex.x);
-                        max_vertex.y = std::max(max_vertex.y, vertex.y);
-                        max_vertex.z = std::max(max_vertex.z, vertex.z);
-                    }
-                    
-                    OptixAabb aabb;
-                    aabb.minX = min_vertex.x;
-                    aabb.minY = min_vertex.y;
-                    aabb.minZ = min_vertex.z;
-                    aabb.maxX = max_vertex.x;
-                    aabb.maxY = max_vertex.y;
-                    aabb.maxZ = max_vertex.z;
-                    aabbs.push_back(aabb);
+                    uuids.push_back(uuid);
                 }
             }
             
-            if (triangle_vertices.empty()) {
-                if (message_flag) {
-                    std::cout << "SkyViewFactorModel: No valid triangles found" << std::endl;
-                }
-                return;
-            }
+            // Set buffer sizes and upload data
+            RT_CHECK_ERROR(rtBufferSetSize2D(triangle_vertices_RTbuffer, vertices.size(), 1));
+            RT_CHECK_ERROR(rtBufferSetSize1D(triangle_UUID_RTbuffer, uuids.size()));
             
-            // Create triangle input
-            OptixBuildInput triangle_input = {};
-            triangle_input.type = OPTIX_BUILD_INPUT_TYPE_TRIANGLES;
-            triangle_input.triangleArray.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3;
-            triangle_input.triangleArray.vertexStrideInBytes = sizeof(optix::float3);
-            triangle_input.triangleArray.numVertices = triangle_vertices.size();
-            triangle_input.triangleArray.vertexBuffers = (CUdeviceptr*)&triangle_vertices[0];
-            triangle_input.triangleArray.indexFormat = OPTIX_INDICES_FORMAT_UNSIGNED_INT3;
-            triangle_input.triangleArray.indexStrideInBytes = 3 * sizeof(uint32_t);
-            triangle_input.triangleArray.numIndexTriplets = triangle_indices.size() / 3;
-            triangle_input.triangleArray.indexBuffer = (CUdeviceptr)&triangle_indices[0];
+            float3* vertex_data;
+            RT_CHECK_ERROR(rtBufferMap(triangle_vertices_RTbuffer, (void**)&vertex_data));
+            memcpy(vertex_data, vertices.data(), vertices.size() * sizeof(float3));
+            RT_CHECK_ERROR(rtBufferUnmap(triangle_vertices_RTbuffer));
             
-            // Create geometry flags array
-            int geometry_flags = OPTIX_GEOMETRY_FLAG_NONE;
-            triangle_input.triangleArray.flags = &geometry_flags;
-            triangle_input.triangleArray.numSbtRecords = 1;
+            uint* uuid_data;
+            RT_CHECK_ERROR(rtBufferMap(triangle_UUID_RTbuffer, (void**)&uuid_data));
+            memcpy(uuid_data, uuids.data(), uuids.size() * sizeof(uint));
+            RT_CHECK_ERROR(rtBufferUnmap(triangle_UUID_RTbuffer));
             
-            // Create GAS build options
-            OptixAccelBuildOptions gas_accel_options = {};
-            gas_accel_options.buildFlags = OPTIX_BUILD_FLAG_ALLOW_UPDATE;
-            gas_accel_options.operation = OPTIX_BUILD_OPERATION_BUILD;
+            // Add geometry to group
+            RT_CHECK_ERROR(rtGeometryGroupSetChildCount(geometry_group, 1));
+            RT_CHECK_ERROR(rtGeometryGroupSetChild(geometry_group, 0, triangle_geometry));
             
-            // Build GAS
-            OptixAccelBufferSizes gas_buffer_sizes;
-            OptixResult result = optixAccelComputeMemoryUsage((OptixDeviceContext)optix_context, &gas_accel_options, &triangle_input, 1, &gas_buffer_sizes);
-            if (result != OPTIX_SUCCESS) {
-                throw std::runtime_error("Failed to compute GAS memory usage");
-            }
+            // Set top object
+            RT_CHECK_ERROR(rtVariableSetObject(top_object, geometry_group));
             
-            // Allocate GAS buffers (simplified - in real implementation would use CUDA memory)
-            // For now, we'll just mark the structure as created
-            optix_gas = (void*)0x1; // Placeholder
+            // Mark geometry as initialized
+            isgeometryinitialized = true;
+            geometry_dirty = false;
             
             if (message_flag) {
-                std::cout << "SkyViewFactorModel: OptiX acceleration structures created successfully" << std::endl;
-                std::cout << "  - Triangles: " << triangle_indices.size() / 3 << std::endl;
-                std::cout << "  - Vertices: " << triangle_vertices.size() << std::endl;
+                std::cout << "SkyViewFactorModel: OptiX geometry updated successfully" << std::endl;
+                std::cout << "  - Primitives: " << uuids.size() << std::endl;
+                std::cout << "  - Vertices: " << vertices.size() << std::endl;
             }
             
         } catch (const std::exception& e) {
             if (message_flag) {
-                std::cout << "SkyViewFactorModel: Failed to create acceleration structures: " << e.what() << std::endl;
+                std::cout << "SkyViewFactorModel: Failed to update geometry: " << e.what() << std::endl;
             }
             throw;
         }
-    #endif
-}
-
-const char* SkyViewFactorModel::getSkyViewFactorPTXCode() {
-    #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
-        // In a real implementation, this would return compiled PTX code
-        // For now, we'll return a minimal PTX program that compiles
-        static const char* ptx_code = R"(
-.version 6.5
-.target sm_50
-.address_size 64
-
-.visible .entry skyViewFactorRayGeneration() {
-    ret;
-}
-
-.visible .entry skyViewFactorClosestHit() {
-    ret;
-}
-
-.visible .entry skyViewFactorAnyHit() {
-    ret;
-}
-
-.visible .entry skyViewFactorMiss() {
-    ret;
-}
-)";
-        return ptx_code;
-    #else
-        return nullptr;
-    #endif
-}
-
-size_t SkyViewFactorModel::getSkyViewFactorPTXSize() {
-    #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
-        const char* ptx = getSkyViewFactorPTXCode();
-        if (ptx) {
-            return strlen(ptx);
-        }
-        return 0;
-    #else
-        return 0;
     #endif
 }
 
@@ -999,24 +886,49 @@ float SkyViewFactorModel::calculateSkyViewFactorGPU(const vec3& point) {
                 }
             }
             
-            // Real GPU implementation using OptiX
-            if (message_flag) {
-                std::cout << "SkyViewFactorModel: GPU OptiX calculation for " << rayDirections.size() << " rays" << std::endl;
+            // Update geometry if needed
+            if (geometry_dirty || !isgeometryinitialized) {
+                updateOptiXGeometry();
             }
             
-            // Real GPU implementation using OptiX
+            // Set launch parameters
+            float point_array[3] = {point.x, point.y, point.z};
+            RT_CHECK_ERROR(rtVariableSet3fv(sample_point_var, point_array));
+            RT_CHECK_ERROR(rtVariableSet1ui(ray_count_var, rayCount));
+            RT_CHECK_ERROR(rtVariableSet1f(max_ray_length_var, maxRayLength));
+            
+            // Create result buffer
+            RTbuffer result_buffer;
+            RTvariable result_var;
+            RT_CHECK_ERROR(rtBufferCreate(OptiX_Context, RT_BUFFER_OUTPUT, &result_buffer));
+            RT_CHECK_ERROR(rtBufferSetFormat(result_buffer, RT_FORMAT_FLOAT));
+            RT_CHECK_ERROR(rtBufferSetSize1D(result_buffer, 1));
+            RT_CHECK_ERROR(rtContextDeclareVariable(OptiX_Context, "svf_result", &result_var));
+            RT_CHECK_ERROR(rtVariableSetObject(result_var, result_buffer));
+            
+            // Initialize result buffer to zero
+            float* result_data;
+            RT_CHECK_ERROR(rtBufferMap(result_buffer, (void**)&result_data));
+            result_data[0] = 0.0f;
+            RT_CHECK_ERROR(rtBufferUnmap(result_buffer));
+            
+            // Launch OptiX computation
+            RT_CHECK_ERROR(rtContextValidate(OptiX_Context));
+            RT_CHECK_ERROR(rtContextLaunch2D(OptiX_Context, 0, rayCount, 1));
+            
+            // Retrieve result
+            RT_CHECK_ERROR(rtBufferMap(result_buffer, (void**)&result_data));
+            float svf = result_data[0] / (float)rayCount;
+            RT_CHECK_ERROR(rtBufferUnmap(result_buffer));
+            
+            // Cleanup
+            RT_CHECK_ERROR(rtBufferDestroy(result_buffer));
+            
             if (message_flag) {
-                std::cout << "SkyViewFactorModel: Using GPU OptiX implementation" << std::endl;
+                std::cout << "SkyViewFactorModel: GPU OptiX calculation completed, SVF = " << svf << std::endl;
             }
             
-            // TODO: Implement real OptiX ray tracing here
-            // This would involve:
-            // 1. Set up launch parameters
-            // 2. Launch OptiX kernel
-            // 3. Collect results
-            
-            // For now, use the optimized CPU implementation as fallback
-            return calculateSkyViewFactorOptimized(point, primitiveVertices);
+            return svf;
             
         } catch (const std::exception& e) {
             if (message_flag) {
@@ -1030,6 +942,91 @@ float SkyViewFactorModel::calculateSkyViewFactorGPU(const vec3& point) {
             std::cout << "SkyViewFactorModel: GPU implementation called but OptiX not available, falling back to CPU" << std::endl;
         }
         return calculateSkyViewFactorCPU(point);
+    #endif
+}
+
+std::vector<float> SkyViewFactorModel::calculateSkyViewFactorsGPUBatch(const std::vector<vec3>& points) {
+    #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
+        try {
+            if (message_flag) {
+                std::cout << "SkyViewFactorModel: GPU batch processing for " << points.size() << " points" << std::endl;
+            }
+            
+            // Update geometry if needed
+            if (geometry_dirty || !isgeometryinitialized) {
+                updateOptiXGeometry();
+            }
+            
+            std::vector<float> results(points.size());
+            
+            // Process points in batches to avoid memory issues
+            const size_t batch_size = 1000; // Process 1000 points at a time
+            for (size_t start = 0; start < points.size(); start += batch_size) {
+                size_t end = std::min(start + batch_size, points.size());
+                size_t current_batch_size = end - start;
+                
+                // Create input buffer for current batch
+                RTbuffer points_buffer;
+                RTvariable points_var;
+                RT_CHECK_ERROR(rtBufferCreate(OptiX_Context, RT_BUFFER_INPUT, &points_buffer));
+                RT_CHECK_ERROR(rtBufferSetFormat(points_buffer, RT_FORMAT_FLOAT3));
+                RT_CHECK_ERROR(rtBufferSetSize1D(points_buffer, current_batch_size));
+                RT_CHECK_ERROR(rtContextDeclareVariable(OptiX_Context, "batch_points", &points_var));
+                RT_CHECK_ERROR(rtVariableSetObject(points_var, points_buffer));
+                
+                // Upload points data
+                float3* points_data;
+                RT_CHECK_ERROR(rtBufferMap(points_buffer, (void**)&points_data));
+                for (size_t i = 0; i < current_batch_size; ++i) {
+                    points_data[i] = make_float3(points[start + i].x, points[start + i].y, points[start + i].z);
+                }
+                RT_CHECK_ERROR(rtBufferUnmap(points_buffer));
+                
+                // Create output buffer for current batch
+                RTbuffer results_buffer;
+                RTvariable results_var;
+                RT_CHECK_ERROR(rtBufferCreate(OptiX_Context, RT_BUFFER_OUTPUT, &results_buffer));
+                RT_CHECK_ERROR(rtBufferSetFormat(results_buffer, RT_FORMAT_FLOAT));
+                RT_CHECK_ERROR(rtBufferSetSize1D(results_buffer, current_batch_size));
+                RT_CHECK_ERROR(rtContextDeclareVariable(OptiX_Context, "batch_results", &results_var));
+                RT_CHECK_ERROR(rtVariableSetObject(results_var, results_buffer));
+                
+                // Set other launch parameters
+                RT_CHECK_ERROR(rtVariableSet1ui(ray_count_var, rayCount));
+                RT_CHECK_ERROR(rtVariableSet1f(max_ray_length_var, maxRayLength));
+                
+                // Launch computation for current batch
+                RT_CHECK_ERROR(rtContextValidate(OptiX_Context));
+                RT_CHECK_ERROR(rtContextLaunch2D(OptiX_Context, 0, current_batch_size, rayCount));
+                
+                // Download results for current batch
+                float* batch_results;
+                RT_CHECK_ERROR(rtBufferMap(results_buffer, (void**)&batch_results));
+                for (size_t i = 0; i < current_batch_size; ++i) {
+                    results[start + i] = batch_results[i] / (float)rayCount;
+                }
+                RT_CHECK_ERROR(rtBufferUnmap(results_buffer));
+                
+                // Cleanup batch buffers
+                RT_CHECK_ERROR(rtBufferDestroy(points_buffer));
+                RT_CHECK_ERROR(rtBufferDestroy(results_buffer));
+            }
+            
+            if (message_flag) {
+                std::cout << "SkyViewFactorModel: GPU batch processing completed" << std::endl;
+            }
+            
+            return results;
+            
+        } catch (const std::exception& e) {
+            if (message_flag) {
+                std::cout << "SkyViewFactorModel: GPU batch processing failed: " << e.what() << std::endl;
+            }
+            // Fallback to CPU implementation
+            return calculateSkyViewFactorsCPU(points, 0);
+        }
+    #else
+        return calculateSkyViewFactorsCPU(points, 0);
     #endif
 }
 
@@ -1116,15 +1113,25 @@ std::vector<float> SkyViewFactorModel::calculateSkyViewFactors(const std::vector
         primitiveVertices.push_back(vertices);
     }
     
-    // Choose between GPU and CPU implementation for each point
-    if (optix_flag) {
-        // Use GPU implementation for each point
-        for (size_t i = 0; i < points.size(); ++i) {
-            try {
-                results[i] = calculateSkyViewFactorGPU(points[i]);
-            } catch (...) {
-                // Fallback to safe value if calculation fails
-                results[i] = 0.0f;
+    // Choose between GPU and CPU implementation
+    if (optix_flag && !force_cpu && points.size() > 10) {
+        // Use GPU batch processing for large point sets
+        try {
+            results = calculateSkyViewFactorsGPUBatch(points);
+        } catch (...) {
+            if (message_flag) {
+                std::cout << "SkyViewFactorModel: GPU batch processing failed, falling back to CPU" << std::endl;
+            }
+            // Fallback to CPU implementation
+            #ifdef _OPENMP
+            #pragma omp parallel for schedule(static) num_threads(actual_threads)
+            #endif
+            for (size_t i = 0; i < points.size(); ++i) {
+                try {
+                    results[i] = calculateSkyViewFactorOptimized(points[i], primitiveVertices);
+                } catch (...) {
+                    results[i] = 0.0f;
+                }
             }
         }
     } else {

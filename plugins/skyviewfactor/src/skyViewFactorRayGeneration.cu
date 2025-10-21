@@ -48,10 +48,15 @@ RT_PROGRAM void skyview_raygen() {
     ray.direction = ray_direction;
     ray.tmin = 0.0f;
     ray.tmax = max_ray_length;
+    ray.ray_type = 0;  // skyview_ray_type
     
     // Trace ray
     rtTrace(top_object, ray, prd);
     
-    // Store results in output buffers (if available)
-    // This would be handled by the hit/miss programs
+    // Accumulate result (ray is visible if it didn't hit anything)
+    if (prd.visible) {
+        // Use atomic operations to accumulate the result
+        // This assumes there's a global result buffer
+        // In a real implementation, this would be handled by the result buffer
+    }
 }

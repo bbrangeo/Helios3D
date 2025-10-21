@@ -66,13 +66,9 @@ endif()
 # OptiX support (only if CUDA is available)
 if(CUDA_AVAILABLE)
     if(UNIX AND NOT APPLE)
-        if( OPTIX_VERSION_LEGACY )
-            set(OPTIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/lib/OptiX/linux64-5.1.0/)
-            message("Using legacy OptiX version 5.1")
-        else()
-            set(OPTIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/lib/OptiX/linux64-6.5.0/)
-            message("Using OptiX version 6.5")
-        endif()
+        # Force legacy OptiX version 5.1 for skyviewfactor compatibility
+        set(OPTIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/lib/OptiX/linux64-5.1.0/)
+        message("Using legacy OptiX version 5.1 for skyviewfactor compatibility")
         
         # Check if OptiX library actually exists
         if(EXISTS "${OPTIX_PATH}include/optix.h" AND EXISTS "${OPTIX_PATH}lib64/liboptix.so")

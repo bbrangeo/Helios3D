@@ -20,11 +20,10 @@ using namespace optix;
 
 #include "SkyViewFactorRayTracing.cuh"
 
-// OptiX 6.5.0 primitive intersection programs
-rtDeclareVariable(optix::Ray, ray, rtCurrentRay, );
+// OptiX 5.1.0 primitive intersection programs
+rtDeclareVariable(Ray, ray, rtCurrentRay, );
 rtDeclareVariable(float, t_hit, rtIntersectionDistance, );
-rtDeclareVariable(unsigned int, primitiveIndex, attribute primitiveIndex, );
-rtDeclareVariable(PerRayData, prd, rtPayload, );
+rtDeclareVariable(unsigned int, UUID, attribute UUID, );
 
 // Triangle intersection program
 RT_PROGRAM void skyview_triangle_intersect(int primIdx) {
@@ -68,8 +67,10 @@ RT_PROGRAM void skyview_triangle_intersect(int primIdx) {
     float t = f * dot(edge2, q);
     
     if (t > 0.00001f) {
-        // Use OptiX 6.5.0 API for intersection reporting
-        optixReportIntersection(t, 0);
+        // Use OptiX 5.1.0 API for intersection reporting
+        if (rtPotentialIntersection(t)) {
+            rtReportIntersection(0);
+        }
     }
 }
 

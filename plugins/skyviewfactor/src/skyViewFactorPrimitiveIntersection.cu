@@ -15,6 +15,20 @@
 
 #include <optix.h>
 #include <optix_device.h>
+
+// Patch de compatibilité pour OptiX 5 avec CUDA moderne
+__inline__ __host__ __device__ int float_as_int(float f) {
+    int tmp;
+    memcpy(&tmp, &f, sizeof(float));
+    return tmp;
+}
+
+__inline__ __host__ __device__ float int_as_float(int i) {
+    float tmp;
+    memcpy(&tmp, &i, sizeof(int));
+    return tmp;
+}
+
 #include <optixu/optixu_aabb_namespace.h>
 #include <optixu/optixu_math_namespace.h>
 

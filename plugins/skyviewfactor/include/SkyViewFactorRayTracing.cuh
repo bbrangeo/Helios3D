@@ -18,38 +18,12 @@
 
 #include <stdint.h>
 #include <math.h>
-#include <cstring>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
 typedef unsigned int uint;
-
-// Patch de compatibilité pour OptiX 5 avec CUDA moderne
-__inline__ __host__ __device__ int float_as_int(float f) {
-    int tmp;
-    memcpy(&tmp, &f, sizeof(float));
-    return tmp;
-}
-
-__inline__ __host__ __device__ float int_as_float(int i) {
-    float tmp;
-    memcpy(&tmp, &i, sizeof(int));
-    return tmp;
-}
-
-__inline__ __host__ __device__ unsigned int float_as_uint(float f) {
-    unsigned int tmp;
-    memcpy(&tmp, &f, sizeof(float));
-    return tmp;
-}
-
-__inline__ __host__ __device__ float uint_as_float(unsigned int i) {
-    float tmp;
-    memcpy(&tmp, &i, sizeof(unsigned int));
-    return tmp;
-}
 
 // Launch parameters
 rtDeclareVariable(rtObject, top_object, , );

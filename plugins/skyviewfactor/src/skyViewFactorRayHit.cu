@@ -20,9 +20,10 @@ using namespace optix;
 
 #include "SkyViewFactorRayTracing.cuh"
 
-rtDeclareVariable(Ray, ray, rtCurrentRay, );
+// OptiX 6.5.0 ray hit programs
+rtDeclareVariable(optix::Ray, ray, rtCurrentRay, );
 rtDeclareVariable(float, t_hit, rtIntersectionDistance, );
-rtDeclareVariable(unsigned int, UUID, attribute UUID, );
+rtDeclareVariable(unsigned int, primitiveIndex, attribute primitiveIndex, );
 
 // Closest hit program
 RT_PROGRAM void skyview_closest_hit() {
@@ -32,7 +33,7 @@ RT_PROGRAM void skyview_closest_hit() {
     prd.hit_point = ray.origin + t_hit * ray.direction;
     
     // Get primitive ID from geometry using OptiX 6.5.0 attribute system
-    prd.primitiveID = UUID;
+    prd.primitiveID = primitiveIndex;
     
     // Calculate surface normal (simplified - would need proper geometry data)
     prd.normal = make_float3(0.0f, 0.0f, 1.0f);  // Placeholder
@@ -45,10 +46,10 @@ RT_PROGRAM void skyview_any_hit() {
     prd.visible = false;
     prd.distance = t_hit;
     prd.hit_point = ray.origin + t_hit * ray.direction;
-    prd.primitiveID = UUID;
+    prd.primitiveID = primitiveIndex;
     
-    // Terminate ray tracing
-    rtTerminateRay();
+    // Terminate ray tracing using OptiX 6.5.0 API
+    optixTerminateRay();
 }
 
 // Miss program

@@ -25,7 +25,7 @@
 
 typedef unsigned int uint;
 
-// launch parameters
+// OptiX 6.5.0 launch parameters
 rtDeclareVariable(rtObject, top_object, , );
 rtDeclareVariable(unsigned int, random_seed, , );
 rtDeclareVariable(unsigned int, Nrays_launch, , );
@@ -38,10 +38,18 @@ rtDeclareVariable(unsigned int, skyview_ray_type, , );
 rtDeclareVariable(uint3, launch_index, rtLaunchIndex, );
 rtDeclareVariable(uint3, launch_dim, rtLaunchDim, );
 
-// Geometry buffers (similar to radiation plugin)
+// Geometry buffers for OptiX 6.5.0
 rtBuffer<float3, 2> triangle_vertices;
 rtBuffer<unsigned int, 1> triangle_UUID;
 rtBuffer<unsigned int, 1> primitive_type;
+
+// OptiX 6.5.0 ray tracing context
+rtDeclareVariable(optix::Ray, ray, rtCurrentRay, );
+rtDeclareVariable(float, t_hit, rtIntersectionDistance, );
+rtDeclareVariable(unsigned int, primitiveIndex, attribute primitiveIndex, );
+
+// OptiX 6.5.0 ray payload
+rtDeclareVariable(PerRayData, prd, rtPayload, );
 
 // Per-ray data structure
 struct PerRayData {

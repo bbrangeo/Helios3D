@@ -24,6 +24,7 @@ using namespace optix;
 rtDeclareVariable(optix::Ray, ray, rtCurrentRay, );
 rtDeclareVariable(float, t_hit, rtIntersectionDistance, );
 rtDeclareVariable(unsigned int, primitiveIndex, attribute primitiveIndex, );
+rtDeclareVariable(PerRayData, prd, rtPayload, );
 
 // Closest hit program
 RT_PROGRAM void skyview_closest_hit() {

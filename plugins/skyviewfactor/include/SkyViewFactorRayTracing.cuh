@@ -43,13 +43,13 @@ rtBuffer<float3, 2> triangle_vertices;
 rtBuffer<unsigned int, 1> triangle_UUID;
 rtBuffer<unsigned int, 1> primitive_type;
 
-// OptiX 6.5.0 ray tracing context
-rtDeclareVariable(optix::Ray, ray, rtCurrentRay, );
-rtDeclareVariable(float, t_hit, rtIntersectionDistance, );
-rtDeclareVariable(unsigned int, primitiveIndex, attribute primitiveIndex, );
+// OptiX 6.5.0 ray tracing context - these will be declared in individual files
+// rtDeclareVariable(optix::Ray, ray, rtCurrentRay, );
+// rtDeclareVariable(float, t_hit, rtIntersectionDistance, );
+// rtDeclareVariable(unsigned int, primitiveIndex, attribute primitiveIndex, );
 
-// OptiX 6.5.0 ray payload
-rtDeclareVariable(PerRayData, prd, rtPayload, );
+// OptiX 6.5.0 ray payload - will be declared in individual files
+// rtDeclareVariable(PerRayData, prd, rtPayload, );
 
 // Per-ray data structure
 struct PerRayData {

@@ -14,6 +14,7 @@
 */
 
 #include <optix.h>
+#include <optix_device.h>
 #include "SkyViewFactorRayTracing.cuh"
 
 using namespace optix;

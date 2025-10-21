@@ -14,6 +14,7 @@
 */
 
 #include <optix.h>
+#include <optix_device.h>
 #include <optixu/optixu_aabb_namespace.h>
 #include <optixu/optixu_math_namespace.h>
 

@@ -38,6 +38,11 @@ rtDeclareVariable(unsigned int, skyview_ray_type, , );
 rtDeclareVariable(uint3, launch_index, rtLaunchIndex, );
 rtDeclareVariable(uint3, launch_dim, rtLaunchDim, );
 
+// Geometry buffers (similar to radiation plugin)
+rtBuffer<float3, 2> triangle_vertices;
+rtBuffer<unsigned int, 1> triangle_UUID;
+rtBuffer<unsigned int, 1> primitive_type;
+
 // Per-ray data structure
 struct PerRayData {
     bool visible;        // Whether the ray hits the sky (no obstacles)

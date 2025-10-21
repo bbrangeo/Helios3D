@@ -23,15 +23,15 @@
 
 // Forward declarations for OptiX types (only if OptiX is available)
 #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
-// Use opaque pointer types to avoid conflicts with OptiX headers
-typedef void* RTcontext;
-typedef void* RTprogram;
-typedef void* RTgeometrygroup;
-typedef void* RTacceleration;
-typedef void* RTgeometry;
-typedef void* RTgeometrytriangles;
-typedef void* RTbuffer;
-typedef void* RTvariable;
+// Forward declare OptiX types to avoid including optix.h in header
+typedef struct RTcontext_st* RTcontext;
+typedef struct RTprogram_st* RTprogram;
+typedef struct RTgeometrygroup_st* RTgeometrygroup;
+typedef struct RTacceleration_st* RTacceleration;
+typedef struct RTgeometry_st* RTgeometry;
+typedef struct RTgeometrytriangles_st* RTgeometrytriangles;
+typedef struct RTbuffer_st* RTbuffer;
+typedef struct RTvariable_st* RTvariable;
 #else
 // Dummy types when OptiX is not available
 typedef void* RTcontext;

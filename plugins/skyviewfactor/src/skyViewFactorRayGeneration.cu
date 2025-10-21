@@ -13,7 +13,7 @@
  *
 */
 
-#include <optix_world.h>
+#include <optix.h>
 #include <optixu/optixu_math_namespace.h>
 
 using namespace optix;

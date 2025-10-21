@@ -22,6 +22,7 @@ using namespace optix;
 
 rtDeclareVariable(Ray, ray, rtCurrentRay, );
 rtDeclareVariable(float, t_hit, rtIntersectionDistance, );
+rtDeclareVariable(unsigned int, UUID, attribute UUID, );
 
 // Triangle intersection program
 RT_PROGRAM void skyview_triangle_intersect(int primIdx) {

@@ -21,8 +21,11 @@
 #include <vector>
 #include <string>
 
-// OptiX types will be defined by including optix.h in source files
-// No forward declarations needed - let OptiX headers define the types
+// NVIDIA OptiX Includes (only if OptiX is available)
+#if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
+#include <optix.h>
+#include <optixu/optixu_math_namespace.h>
+#endif
 
 namespace helios {
 
@@ -110,7 +113,7 @@ namespace helios {
         std::vector<float> calculateSkyViewFactorsGPUBatch(const std::vector<vec3>& points); ///< GPU batch processing for multiple points
         void updateOptiXGeometry();          ///< Update OptiX geometry from Helios context
         void createOptiXGeometry();          ///< Create OptiX geometry from Helios primitives
-        void addBuffer(const char* name, RTbuffer& buffer, RTvariable& variable, unsigned int type, unsigned int format, int dimension); ///< Helper to add OptiX buffers
+        void addBuffer(const char* name, RTbuffer& buffer, RTvariable& variable, RTbuffertype type, RTformat format, int dimension); ///< Helper to add OptiX buffers
         
     public:
         

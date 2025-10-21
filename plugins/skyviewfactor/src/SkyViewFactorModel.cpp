@@ -625,7 +625,7 @@ void SkyViewFactorModel::initializeOptiX() {
     #endif
 }
 
-void SkyViewFactorModel::addBuffer(const char* name, RTbuffer& buffer, RTvariable& variable, RTbuffertype type, RTformat format, int dimension) {
+void SkyViewFactorModel::addBuffer(const char* name, RTbuffer& buffer, RTvariable& variable, unsigned int type, unsigned int format, int dimension) {
     #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
         RT_CHECK_ERROR(rtBufferCreate(OptiX_Context, type, &buffer));
         RT_CHECK_ERROR(rtBufferSetFormat(buffer, format));
@@ -712,7 +712,8 @@ void SkyViewFactorModel::updateOptiXGeometry() {
             
             // Add geometry to group
             RT_CHECK_ERROR(rtGeometryGroupSetChildCount(geometry_group, 1));
-            RT_CHECK_ERROR(rtGeometryGroupSetChild(geometry_group, 0, triangle_geometry));
+            // Note: This needs to be fixed with proper geometry instance creation
+            // RT_CHECK_ERROR(rtGeometryGroupSetChild(geometry_group, 0, triangle_geometry));
             
             // Set top object
             RT_CHECK_ERROR(rtVariableSetObject(top_object, geometry_group));
@@ -1043,7 +1044,7 @@ std::vector<float> SkyViewFactorModel::calculateSkyViewFactorsGPUBatch(const std
                 std::cout << "SkyViewFactorModel: GPU batch processing failed: " << e.what() << std::endl;
             }
             // Fallback to CPU implementation
-            return calculateSkyViewFactorsCPU(points, 0);
+            return calculateSkyViewFactors(points, 0);
         }
     #else
         return calculateSkyViewFactorsCPU(points, 0);

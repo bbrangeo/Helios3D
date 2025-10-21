@@ -23,25 +23,15 @@
 
 // Forward declarations for OptiX types (only if OptiX is available)
 #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
-// Forward declare OptiX types to avoid including optix.h in header
-// These will be properly defined when optix.h is included in source files
-struct RTcontext_st;
-struct RTprogram_st;
-struct RTgeometrygroup_st;
-struct RTacceleration_st;
-struct RTgeometry_st;
-struct RTgeometrytriangles_st;
-struct RTbuffer_st;
-struct RTvariable_st;
-
-typedef struct RTcontext_st* RTcontext;
-typedef struct RTprogram_st* RTprogram;
-typedef struct RTgeometrygroup_st* RTgeometrygroup;
-typedef struct RTacceleration_st* RTacceleration;
-typedef struct RTgeometry_st* RTgeometry;
-typedef struct RTgeometrytriangles_st* RTgeometrytriangles;
-typedef struct RTbuffer_st* RTbuffer;
-typedef struct RTvariable_st* RTvariable;
+// Use opaque pointer types to avoid conflicts with OptiX headers
+typedef void* RTcontext;
+typedef void* RTprogram;
+typedef void* RTgeometrygroup;
+typedef void* RTacceleration;
+typedef void* RTgeometry;
+typedef void* RTgeometrytriangles;
+typedef void* RTbuffer;
+typedef void* RTvariable;
 #else
 // Dummy types when OptiX is not available
 typedef void* RTcontext;
@@ -124,6 +114,8 @@ namespace helios {
         RTvariable ray_count_var;            ///< Ray count variable
         RTvariable max_ray_length_var;       ///< Max ray length variable
         RTvariable skyview_ray_type;         ///< Ray type variable
+        RTvariable triangle_vertices_RTvariable; ///< Triangle vertices variable
+        RTvariable triangle_UUID_RTvariable;     ///< Triangle UUID variable
         
         // Geometry state tracking
         bool geometry_dirty;                 ///< Flag indicating geometry needs update

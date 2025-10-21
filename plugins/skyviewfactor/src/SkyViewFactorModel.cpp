@@ -14,7 +14,13 @@
 */
 
 #include "SkyViewFactorModel.h"
-#include "SkyViewFactorRayTracing.h"
+
+// Include OptiX headers only in source file to avoid conflicts
+#if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
+#include <optix.h>
+#include <optixu/optixu_math_namespace.h>
+#endif
+
 #include <cmath>
 #include <ctime>
 #include <fstream>
@@ -625,7 +631,7 @@ void SkyViewFactorModel::initializeOptiX() {
     #endif
 }
 
-void SkyViewFactorModel::addBuffer(const char* name, RTbuffer& buffer, RTvariable& variable, unsigned int type, unsigned int format, int dimension) {
+void SkyViewFactorModel::addBuffer(const char* name, RTbuffer& buffer, RTvariable& variable, RTbuffertype type, RTformat format, int dimension) {
     #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
         RT_CHECK_ERROR(rtBufferCreate(OptiX_Context, type, &buffer));
         RT_CHECK_ERROR(rtBufferSetFormat(buffer, format));

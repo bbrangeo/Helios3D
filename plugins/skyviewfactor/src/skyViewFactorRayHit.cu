@@ -1,4 +1,4 @@
-/** \file "skyViewFactorRayHit.cu" File containing OptiX ray hit programs for SkyViewFactor
+/** \file "skyViewFactorRayHit.cu" File containing OptiX 6.5.0 ray hit programs for SkyViewFactor
  *
  *    Copyright (C) 2025 PyHelios Team
  *
@@ -20,10 +20,11 @@ using namespace optix;
 
 #include "SkyViewFactorRayTracing.cuh"
 
-// OptiX 5.1.0 ray hit programs
-rtDeclareVariable(Ray, ray, rtCurrentRay, );
+// OptiX 6.5.0 ray hit programs
+rtDeclareVariable(optix::Ray, ray, rtCurrentRay, );
 rtDeclareVariable(float, t_hit, rtIntersectionDistance, );
-rtDeclareVariable(unsigned int, UUID, attribute UUID, );
+rtDeclareVariable(unsigned int, primitiveIndex, attribute primitiveIndex, );
+rtDeclareVariable(PerRayData, prd, rtPayload, );
 
 // Closest hit program
 RT_PROGRAM void skyview_closest_hit() {
@@ -32,8 +33,8 @@ RT_PROGRAM void skyview_closest_hit() {
     prd.distance = t_hit;
     prd.hit_point = ray.origin + t_hit * ray.direction;
     
-    // Get primitive ID from geometry using OptiX 5.1.0 attribute system
-    prd.primitiveID = UUID;
+    // Get primitive ID from geometry using OptiX 6.5.0 attribute system
+    prd.primitiveID = primitiveIndex;
     
     // Calculate surface normal (simplified - would need proper geometry data)
     prd.normal = make_float3(0.0f, 0.0f, 1.0f);  // Placeholder
@@ -46,10 +47,10 @@ RT_PROGRAM void skyview_any_hit() {
     prd.visible = false;
     prd.distance = t_hit;
     prd.hit_point = ray.origin + t_hit * ray.direction;
-    prd.primitiveID = UUID;
+    prd.primitiveID = primitiveIndex;
     
-    // Terminate ray tracing using OptiX 5.1.0 API
-    rtTerminateRay();
+    // Terminate ray tracing using OptiX 6.5.0 API
+    optixTerminateRay();
 }
 
 // Miss program

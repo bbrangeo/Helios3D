@@ -1,4 +1,4 @@
-/** \file "skyViewFactorPrimitiveIntersection.cu" File containing OptiX primitive intersection programs for SkyViewFactor
+/** \file "skyViewFactorPrimitiveIntersection.cu" File containing OptiX 6.5.0 primitive intersection programs for SkyViewFactor
  *
  *    Copyright (C) 2025 PyHelios Team
  *
@@ -20,10 +20,10 @@ using namespace optix;
 
 #include "SkyViewFactorRayTracing.cuh"
 
-// OptiX 5.1.0 primitive intersection programs
-rtDeclareVariable(Ray, ray, rtCurrentRay, );
+// OptiX 6.5.0 primitive intersection programs
+rtDeclareVariable(optix::Ray, ray, rtCurrentRay, );
 rtDeclareVariable(float, t_hit, rtIntersectionDistance, );
-rtDeclareVariable(unsigned int, UUID, attribute UUID, );
+rtDeclareVariable(unsigned int, primitiveIndex, attribute primitiveIndex, );
 
 // Triangle intersection program
 RT_PROGRAM void skyview_triangle_intersect(int primIdx) {
@@ -67,10 +67,8 @@ RT_PROGRAM void skyview_triangle_intersect(int primIdx) {
     float t = f * dot(edge2, q);
     
     if (t > 0.00001f) {
-        // Use OptiX 5.1.0 API for intersection reporting
-        if (rtPotentialIntersection(t)) {
-            rtReportIntersection(0);
-        }
+        // Use OptiX 6.5.0 API for intersection reporting
+        optixReportIntersection(t, 0);
     }
 }
 

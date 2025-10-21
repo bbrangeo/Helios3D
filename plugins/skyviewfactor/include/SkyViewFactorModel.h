@@ -24,11 +24,22 @@
 // Forward declarations for OptiX types (only if OptiX is available)
 #if defined(CUDA_AVAILABLE) && defined(OPTIX_AVAILABLE)
 // Forward declare OptiX types to avoid including optix.h in header
+// These will be properly defined when optix.h is included in source files
+struct RTcontext_st;
+struct RTprogram_st;
+struct RTgeometrygroup_st;
+struct RTacceleration_st;
+struct RTgeometry_st;
+struct RTgeometrytriangles_st;
+struct RTbuffer_st;
+struct RTvariable_st;
+
 typedef struct RTcontext_st* RTcontext;
 typedef struct RTprogram_st* RTprogram;
 typedef struct RTgeometrygroup_st* RTgeometrygroup;
 typedef struct RTacceleration_st* RTacceleration;
 typedef struct RTgeometry_st* RTgeometry;
+typedef struct RTgeometrytriangles_st* RTgeometrytriangles;
 typedef struct RTbuffer_st* RTbuffer;
 typedef struct RTvariable_st* RTvariable;
 #else
@@ -38,6 +49,7 @@ typedef void* RTprogram;
 typedef void* RTgeometrygroup;
 typedef void* RTacceleration;
 typedef void* RTgeometry;
+typedef void* RTgeometrytriangles;
 typedef void* RTbuffer;
 typedef void* RTvariable;
 #endif
@@ -126,7 +138,7 @@ namespace helios {
         std::vector<float> calculateSkyViewFactorsGPUBatch(const std::vector<vec3>& points); ///< GPU batch processing for multiple points
         void updateOptiXGeometry();          ///< Update OptiX geometry from Helios context
         void createOptiXGeometry();          ///< Create OptiX geometry from Helios primitives
-        void addBuffer(const char* name, RTbuffer& buffer, RTvariable& variable, RTbuffertype type, RTformat format, int dimension); ///< Helper to add OptiX buffers
+        void addBuffer(const char* name, RTbuffer& buffer, RTvariable& variable, unsigned int type, unsigned int format, int dimension); ///< Helper to add OptiX buffers
         
     public:
         

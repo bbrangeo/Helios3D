@@ -80,6 +80,11 @@ extern "C" cudaError_t cudaGetLastError() { return cudaSuccess; }
 
 // OptiX includes after CUDA
 #include <optix.h>
+#include <optixu/optixu_math_namespace.h>
+
+// Use OptiX math types
+using optix::int2;
+using optix::float3;
 
 // OptiX error handling
 #define RT_CHECK_ERROR(func) \
@@ -109,7 +114,7 @@ void zeroBuffer1D(RTbuffer& buffer, size_t bsize) {
     if (format == RT_FORMAT_FLOAT) {
         memset(data, 0, bsize * sizeof(float));
     } else if (format == RT_FORMAT_FLOAT3) {
-        memset(data, 0, bsize * sizeof(float3));
+        memset(data, 0, bsize * sizeof(optix::float3));
     } else if (format == RT_FORMAT_UNSIGNED_INT) {
         memset(data, 0, bsize * sizeof(unsigned int));
     }
@@ -118,7 +123,7 @@ void zeroBuffer1D(RTbuffer& buffer, size_t bsize) {
 }
 
 // Helper function to zero 2D buffer
-void zeroBuffer2D(RTbuffer& buffer, int2 size) {
+void zeroBuffer2D(RTbuffer& buffer, optix::int2 size) {
     RTformat format;
     RT_CHECK_ERROR(rtBufferGetFormat(buffer, &format));
     RT_CHECK_ERROR(rtBufferSetSize2D(buffer, size.x, size.y));
@@ -130,7 +135,7 @@ void zeroBuffer2D(RTbuffer& buffer, int2 size) {
     if (format == RT_FORMAT_FLOAT) {
         element_size = sizeof(float);
     } else if (format == RT_FORMAT_FLOAT3) {
-        element_size = sizeof(float3);
+        element_size = sizeof(optix::float3);
     } else if (format == RT_FORMAT_UNSIGNED_INT) {
         element_size = sizeof(unsigned int);
     }
@@ -488,17 +493,32 @@ SkyViewFactorModel::SkyViewFactorModel(Context* context_a) {
         }
     #endif
     
-    // Initialize CUDA/OptiX contexts
-    cuda_context = nullptr;
-    optix_context = nullptr;
-    optix_module = nullptr;
-    optix_program_groups = nullptr;
-    optix_pipeline = nullptr;
-    optix_gas = nullptr;
-    optix_sbt = nullptr;
-    optix_raygen_group = nullptr;
-    optix_miss_group = nullptr;
-    optix_hitgroup_group = nullptr;
+    // Initialize OptiX contexts
+    OptiX_Context = nullptr;
+    skyview_raygen = nullptr;
+    skyview_miss = nullptr;
+    skyview_closest_hit = nullptr;
+    skyview_any_hit = nullptr;
+    skyview_triangle_intersect = nullptr;
+    skyview_triangle_bounds = nullptr;
+    geometry_group = nullptr;
+    geometry_acceleration = nullptr;
+    triangle_geometry = nullptr;
+    patch_geometry = nullptr;
+    disk_geometry = nullptr;
+    triangle_vertices_RTbuffer = nullptr;
+    triangle_UUID_RTbuffer = nullptr;
+    patch_vertices_RTbuffer = nullptr;
+    patch_UUID_RTbuffer = nullptr;
+    disk_centers_RTbuffer = nullptr;
+    disk_radii_RTbuffer = nullptr;
+    disk_normals_RTbuffer = nullptr;
+    disk_UUID_RTbuffer = nullptr;
+    top_object = nullptr;
+    sample_point_var = nullptr;
+    ray_count_var = nullptr;
+    max_ray_length_var = nullptr;
+    skyview_ray_type = nullptr;
     
     // Initialize data structures
     skyViewFactors.clear();
@@ -614,7 +634,7 @@ void SkyViewFactorModel::addBuffer(const char* name, RTbuffer& buffer, RTvariabl
         if (dimension == 1) {
             zeroBuffer1D(buffer, 1);
         } else if (dimension == 2) {
-            zeroBuffer2D(buffer, make_int2(1, 1));
+            zeroBuffer2D(buffer, optix::make_int2(1, 1));
         } else {
             throw std::runtime_error("SkyViewFactorModel::addBuffer: invalid buffer dimension of " + std::to_string(dimension) + ", must be 1 or 2.");
         }

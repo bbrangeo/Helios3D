@@ -13,12 +13,10 @@
  *
 */
 
-#include <optix.h>
-#include <optixu/optixu_math_namespace.h>
+#include <optix_world.h>
+#include "SkyViewFactorRayTracing.cuh"
 
 using namespace optix;
-
-#include "SkyViewFactorRayTracing.cuh"
 
 RT_PROGRAM void skyview_raygen() {
     // Get launch parameters
@@ -42,17 +40,16 @@ RT_PROGRAM void skyview_raygen() {
     // Calculate ray weight (cos²(θ))
     prd.weight = calculateRayWeight(ray_direction);
     
-    // Create ray for OptiX 6.5.0
-    optix::Ray ray;
+    // Create ray for OptiX 5.1.0
+    Ray ray;
     ray.origin = sample_point;
     ray.direction = ray_direction;
     ray.tmin = 0.0f;
     ray.tmax = max_ray_length;
     ray.ray_type = skyview_ray_type;
-    ray.mask = 0xFF;
     
-    // Trace ray using OptiX 6.5.0 API
-    optixTrace(top_object, ray, prd);
+    // Trace ray using OptiX 5.1.0 API
+    rtTrace(top_object, ray, prd);
     
     // Accumulate result (ray is visible if it didn't hit anything)
     if (prd.visible) {

@@ -1,4 +1,4 @@
-/** \file "skyViewFactorPrimitiveIntersection.cu" File containing OptiX 6.5.0 primitive intersection programs for SkyViewFactor
+/** \file "skyViewFactorPrimitiveIntersection.cu" File containing OptiX primitive intersection programs for SkyViewFactor
  *
  *    Copyright (C) 2025 PyHelios Team
  *
@@ -14,30 +14,24 @@
 */
 
 #include <optix.h>
+#include <optixu/optixu_aabb_namespace.h>
 #include <optixu/optixu_math_namespace.h>
 
 using namespace optix;
 
 #include "SkyViewFactorRayTracing.cuh"
 
-// OptiX 6.5.0 primitive intersection programs
-rtDeclareVariable(optix::Ray, ray, rtCurrentRay, );
-rtDeclareVariable(float, t_hit, rtIntersectionDistance, );
-rtDeclareVariable(unsigned int, primitiveIndex, attribute primitiveIndex, );
+rtDeclareVariable(Ray, ray, rtCurrentRay, );
+rtDeclareVariable(PerRayData, prd, rtPayload, );
+
+rtDeclareVariable(unsigned int, UUID, attribute UUID, );
 
 // Triangle intersection program
 RT_PROGRAM void skyview_triangle_intersect(int primIdx) {
     // Get triangle vertices from geometry buffer
-    // This would need to be properly set up with the actual geometry data
-    // For now, using a simplified approach
-    
-    // Get vertices for this primitive (would need proper buffer access)
-    float3 v0, v1, v2;
-    
-    // Placeholder - in real implementation would get from triangle_vertices buffer
-    v0 = make_float3(0.0f, 0.0f, 0.0f);
-    v1 = make_float3(1.0f, 0.0f, 0.0f);
-    v2 = make_float3(0.0f, 1.0f, 0.0f);
+    float3 v0 = triangle_vertices[make_uint2(0, primIdx)];
+    float3 v1 = triangle_vertices[make_uint2(1, primIdx)];
+    float3 v2 = triangle_vertices[make_uint2(2, primIdx)];
     
     // Möller-Trumbore ray-triangle intersection
     float3 edge1 = v1 - v0;
@@ -67,8 +61,10 @@ RT_PROGRAM void skyview_triangle_intersect(int primIdx) {
     float t = f * dot(edge2, q);
     
     if (t > 0.00001f) {
-        // Use OptiX 6.5.0 API for intersection reporting
-        optixReportIntersection(t, 0);
+        // Use OptiX 5.1.0 API for intersection reporting
+        if (rtPotentialIntersection(t)) {
+            rtReportIntersection(0);
+        }
     }
 }
 

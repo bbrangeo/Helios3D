@@ -115,6 +115,10 @@ namespace helios {
         void createOptiXGeometry();          ///< Create OptiX geometry from Helios primitives
         void addBuffer(const char* name, RTbuffer& buffer, RTvariable& variable, RTbuffertype type, RTformat format, int dimension); ///< Helper to add OptiX buffers
         
+        // Buffer management helpers
+        void zeroBuffer1D(RTbuffer& buffer, size_t bsize); ///< Zero 1D buffer
+        void zeroBuffer2D(RTbuffer& buffer, optix::int2 size); ///< Zero 2D buffer
+        
     public:
         
         /** \brief Constructor

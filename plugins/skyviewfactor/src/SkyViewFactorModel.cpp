@@ -108,47 +108,7 @@ void sutilHandleError(RTcontext context, RTresult code, const char* file, int li
     throw std::runtime_error(std::string("OptiX Error: ") + error_string);
 }
 
-// Helper function to zero 1D buffer
-void zeroBuffer1D(RTbuffer& buffer, size_t bsize) {
-    RTformat format;
-    RT_CHECK_ERROR(rtBufferGetFormat(buffer, &format));
-    RT_CHECK_ERROR(rtBufferSetSize1D(buffer, bsize));
-    
-    void* data;
-    RT_CHECK_ERROR(rtBufferMap(buffer, &data));
-    
-    if (format == RT_FORMAT_FLOAT) {
-        memset(data, 0, bsize * sizeof(float));
-    } else if (format == RT_FORMAT_FLOAT3) {
-        memset(data, 0, bsize * sizeof(optix::float3));
-    } else if (format == RT_FORMAT_UNSIGNED_INT) {
-        memset(data, 0, bsize * sizeof(unsigned int));
-    }
-    
-    RT_CHECK_ERROR(rtBufferUnmap(buffer));
-}
-
-// Helper function to zero 2D buffer
-void zeroBuffer2D(RTbuffer& buffer, optix::int2 size) {
-    RTformat format;
-    RT_CHECK_ERROR(rtBufferGetFormat(buffer, &format));
-    RT_CHECK_ERROR(rtBufferSetSize2D(buffer, size.x, size.y));
-    
-    void* data;
-    RT_CHECK_ERROR(rtBufferMap(buffer, &data));
-    
-    size_t element_size = 0;
-    if (format == RT_FORMAT_FLOAT) {
-        element_size = sizeof(float);
-    } else if (format == RT_FORMAT_FLOAT3) {
-        element_size = sizeof(optix::float3);
-    } else if (format == RT_FORMAT_UNSIGNED_INT) {
-        element_size = sizeof(unsigned int);
-    }
-    
-    memset(data, 0, size.x * size.y * element_size);
-    RT_CHECK_ERROR(rtBufferUnmap(buffer));
-}
+// Helper function implementations moved to class methods
 
 // Define missing OptiX types if not available
 #ifndef OptixDeviceContextOptions
@@ -1366,4 +1326,44 @@ std::string SkyViewFactorModel::getStatistics() const {
     }
     
     return oss.str();
+}
+
+void SkyViewFactorModel::zeroBuffer1D(RTbuffer& buffer, size_t bsize) {
+    RTformat format;
+    RT_CHECK_ERROR(rtBufferGetFormat(buffer, &format));
+    RT_CHECK_ERROR(rtBufferSetSize1D(buffer, bsize));
+    
+    void* data;
+    RT_CHECK_ERROR(rtBufferMap(buffer, &data));
+    
+    if (format == RT_FORMAT_FLOAT) {
+        memset(data, 0, bsize * sizeof(float));
+    } else if (format == RT_FORMAT_FLOAT3) {
+        memset(data, 0, bsize * sizeof(optix::float3));
+    } else if (format == RT_FORMAT_UNSIGNED_INT) {
+        memset(data, 0, bsize * sizeof(unsigned int));
+    }
+    
+    RT_CHECK_ERROR(rtBufferUnmap(buffer));
+}
+
+void SkyViewFactorModel::zeroBuffer2D(RTbuffer& buffer, optix::int2 size) {
+    RTformat format;
+    RT_CHECK_ERROR(rtBufferGetFormat(buffer, &format));
+    RT_CHECK_ERROR(rtBufferSetSize2D(buffer, size.x, size.y));
+    
+    void* data;
+    RT_CHECK_ERROR(rtBufferMap(buffer, &data));
+    
+    size_t element_size = 0;
+    if (format == RT_FORMAT_FLOAT) {
+        element_size = sizeof(float);
+    } else if (format == RT_FORMAT_FLOAT3) {
+        element_size = sizeof(optix::float3);
+    } else if (format == RT_FORMAT_UNSIGNED_INT) {
+        element_size = sizeof(unsigned int);
+    }
+    
+    memset(data, 0, size.x * size.y * element_size);
+    RT_CHECK_ERROR(rtBufferUnmap(buffer));
 }

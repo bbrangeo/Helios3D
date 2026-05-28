@@ -6,7 +6,7 @@ usage() {
     echo
     echo "Options:"
     echo "  --checkout       Clone the latest Helios repo to /tmp and run tests"
-    echo "  --nogpu          Run only tests that do not require GPU"
+    echo "  --force-vulkan   Force use of Vulkan backend (passes -DFORCE_VULKAN_BACKEND to cmake)"
     echo "  --visbuildonly   Build only, do not run visualizer tests"
     echo "  --memcheck       Enable memory checking tools (requires leaks on macOS or valgrind on Linux)"
     echo "  --debugbuild     Build with Debug configuration"
@@ -16,8 +16,10 @@ usage() {
     echo "  --tests <list>   Run specified tests (comma-separated, e.g., --tests \"radiation,lidar\")"
     echo "  --testcase <case> Pass specific test case to doctest (e.g., --testcase \"My Test Case\")"
     echo "  --doctestargs <args> Pass arguments directly to doctest (e.g., --doctestargs \"--help --list-test-cases\")"
+    echo "  --list-tests         Build test executables and list available test cases without running them"
     echo "  --project-dir <dir>  Use specified directory for project (persistent, not cleaned up)"
     echo "  --disableopenmp      Disable OpenMP by passing -DENABLE_OPENMP=OFF to cmake"
+    echo "  --cmake-args <args>  Pass custom arguments to cmake (e.g., --cmake-args \"-DSOME_OPTION=ON -DANOTHER=OFF\")"
     echo
     exit ${1:-1}
 }
@@ -39,8 +41,7 @@ run_command() {
 }
 
 # Test plugins to include in unified build
-TEST_PLUGINS="energybalance lidar aeriallidar photosynthesis radiation leafoptics solarposition stomatalconductance visualizer voxelintersection weberpenntree canopygenerator boundarylayerconductance syntheticannotation plantarchitecture projectbuilder planthydraulics parameteroptimization collisiondetection"
-TEST_PLUGINS_NOGPU="leafoptics photosynthesis solarposition stomatalconductance visualizer weberpenntree canopygenerator boundarylayerconductance syntheticannotation plantarchitecture projectbuilder planthydraulics parameteroptimization collisiondetection"
+TEST_PLUGINS="energybalance lidar photosynthesis radiation leafoptics solarposition stomatalconductance visualizer weberpenntree canopygenerator boundarylayerconductance syntheticannotation plantarchitecture projectbuilder planthydraulics parameteroptimization collisiondetection"
 
 BUILD_TYPE="Release"
 
@@ -66,10 +67,13 @@ HELIOS_BASE_DIR="$(dirname "$SCRIPT_DIR")"
 # Change to the samples directory relative to the Helios base
 cd "$HELIOS_BASE_DIR/samples" || exit 1
 
-if [[ "${OSTYPE}" != "darwin"* ]] && [[ "${OSTYPE}" != "linux"* ]] && [[ "${OSTYPE}" != "msys"* ]];then
-  echo "UNSUPPORTED OPERATING SYSTEM"
-  exit 1
-fi
+case "${OSTYPE}" in
+  darwin*|linux*|msys*|cygwin*|mingw*) ;;
+  *)
+    echo "UNSUPPORTED OPERATING SYSTEM (OSTYPE='${OSTYPE}', uname -s='$(uname -s 2>/dev/null || echo unknown)')"
+    exit 1
+    ;;
+esac
 
 while [ $# -gt 0 ]; do
   case $1 in
@@ -93,8 +97,8 @@ while [ $# -gt 0 ]; do
     cd ./helios_test/samples || exit 1
     ;;
 
-  --nogpu)
-    TEST_PLUGINS=${TEST_PLUGINS_NOGPU}
+  --force-vulkan)
+    FORCE_VULKAN="ON"
     ;;
 
   --visbuildonly)
@@ -173,8 +177,21 @@ while [ $# -gt 0 ]; do
     shift
     ;;
 
+  --list-tests)
+    LIST_TESTS="ON"
+    ;;
+
   --disableopenmp)
     DISABLE_OPENMP="ON"
+    ;;
+
+  --cmake-args)
+    if [ -z "$2" ]; then
+      echo "Error: --cmake-args requires arguments."
+      usage
+    fi
+    CUSTOM_CMAKE_ARGS="$2"
+    shift
     ;;
 
   --help|-h)
@@ -197,15 +214,11 @@ fi
 if [ -n "$SPECIFIC_TESTS" ]; then
   TEST_SPEC_COUNT=$((TEST_SPEC_COUNT + 1))
 fi
-if [ "$TEST_PLUGINS" = "$TEST_PLUGINS_NOGPU" ]; then
-  TEST_SPEC_COUNT=$((TEST_SPEC_COUNT + 1))
-fi
 
 if [ $TEST_SPEC_COUNT -gt 1 ]; then
   echo "Error: Only one test specification method can be used at a time:"
   echo "  --test <name>     (run single test)"
   echo "  --tests <list>    (run multiple specific tests)"
-  echo "  --nogpu           (run all non-GPU tests)"
   echo ""
   usage
 fi
@@ -236,6 +249,23 @@ fi
 
 if [ "${MEMCHECK}" == "ON" ];then
   BUILD_TYPE="Debug"
+fi
+
+# Configure Vulkan for GPU tests
+if [[ "${OSTYPE}" == "linux"* ]]; then
+    # NVIDIA Linux driver workaround for sequential instance creation bug
+    # See: https://forums.developer.nvidia.com/t/issue-with-repeated-instance-creation-in-one-process/176978
+    # After ~25-35 vkCreateInstance/vkDestroyInstance cycles, NVIDIA driver fails with VK_ERROR_INITIALIZATION_FAILED
+
+    # Solution 1: Use only NVIDIA ICD (modern Vulkan loader method)
+    export VK_LOADER_DRIVERS_SELECT="nvidia*"
+
+    # Solution 2: Increase file descriptor limit
+    # NVIDIA driver has FD leak issue with VkFence objects
+    # See: https://github.com/ValveSoftware/gamescope/pull/454
+    if command -v ulimit >/dev/null 2>&1; then
+        ulimit -n 65536 2>/dev/null
+    fi
 fi
 
 ERROR_COUNT=0
@@ -364,6 +394,12 @@ else
     if [ "${DISABLE_OPENMP}" == "ON" ]; then
       CMAKE_ARGS="${CMAKE_ARGS} -DENABLE_OPENMP=OFF"
     fi
+    if [ "${FORCE_VULKAN}" == "ON" ]; then
+      CMAKE_ARGS="${CMAKE_ARGS} -DFORCE_VULKAN_BACKEND=ON"
+    fi
+    if [ -n "${CUSTOM_CMAKE_ARGS}" ]; then
+      CMAKE_ARGS="${CMAKE_ARGS} ${CUSTOM_CMAKE_ARGS}"
+    fi
 
     run_command cmake .. ${CMAKE_ARGS}
 
@@ -447,7 +483,31 @@ else
     done
     
     echo "Verified ${#TEST_EXECUTABLES[@]} test executable(s): ${TEST_EXECUTABLES[*]}"
-    
+
+    # If --list-tests is specified, list test cases and exit
+    if [ "$LIST_TESTS" == "ON" ]; then
+      echo ""
+      for test_exe in "${TEST_EXECUTABLES[@]}"; do
+        echo -e "\x1B[32m=== Test cases in $test_exe ===\x1B[39m"
+        if [[ "${OSTYPE}" == "msys"* ]]; then
+          "./${test_exe}.exe" --list-test-cases
+        else
+          "./${test_exe}" --list-test-cases
+        fi
+        echo ""
+      done
+
+      cd "$TEMP_BASE" || cleanup
+
+      # Clean up temp directory if not persistent
+      if [ -d "$TEMP_DIR" ] && [ "$PERSISTENT_PROJECT" != "ON" ]; then
+        chmod -R 755 "$TEMP_DIR" 2>/dev/null || true
+        rm -rf "$TEMP_DIR"
+      fi
+
+      exit 0
+    fi
+
     # Run each test executable
     for test_exe in "${TEST_EXECUTABLES[@]}"; do
       
@@ -466,7 +526,23 @@ else
         # Use eval to properly split DOCTEST_ARGS into array elements
         eval "TEST_ARGS_ARRAY+=($DOCTEST_ARGS)"
       fi
-      
+
+      # Validate test case filter matches at least one test before running
+      if [ -n "$TESTCASE_FILTER" ]; then
+        if [[ "${OSTYPE}" == "msys"* ]]; then
+          MATCHED_CASES=$("./${test_exe}.exe" --list-test-cases --test-case="$TESTCASE_FILTER" 2>/dev/null)
+        else
+          MATCHED_CASES=$("./${test_exe}" --list-test-cases --test-case="$TESTCASE_FILTER" 2>/dev/null)
+        fi
+        # Check if doctest reports 0 matching test cases
+        if echo "$MATCHED_CASES" | grep -q "current filters: 0"; then
+          echo -e "\x1B[31mError: No test cases match filter '$TESTCASE_FILTER' in $test_exe\x1B[39m"
+          echo "Use --doctestargs \"--list-test-cases\" to see available test cases"
+          ERROR_COUNT=$((ERROR_COUNT + 1))
+          continue
+        fi
+      fi
+
       if [ ${#TEST_ARGS_ARRAY[@]} -gt 0 ]; then
         echo -ne "Running test $test_exe with args: ${TEST_ARGS_ARRAY[*]}..."
       else

@@ -1,5 +1,443 @@
 # Changelog
 
+# [1.3.72] 2026-05-06
+
+## Core
+- Added `Context::deleteTimeseriesVariable()` to delete a single timeseries variable and all of its data points, identified by label. Issues a non-fatal warning if the variable does not exist; complements the existing `clearTimeseriesData()` (which removes all variables) and `updateTimeseriesData()` (which modifies a single point).
+
+## Plant Architecture
+- Added leaf-to-fruit nitrogen translocation in `removeFruitNitrogen()`. Per-plant fruit demand is now aggregated across all fruiting buds and first satisfied from the available pool; any remaining shortfall is drawn from leaves, with old leaves (age ≥ `remobilization_age_threshold`) donating first and young leaves serving as a fallback. Per-leaf availability uses the same `(current_N_area − minimum_leaf_N_area) × leaf_remobilization_efficiency` reserve as leaf-to-leaf remobilization, distributed proportionally across source leaves; no stress-acceleration multiplier is applied because withdrawal is governed by fruit demand rather than stress signaling. Residual demand that even leaves cannot cover is silently absorbed, preserving the preexisting fail-soft accounting.
+- Petiole geometry is now suppressed when either `petiole.radius` or `petiole.length` is zero (previously only radius=0 suppressed it); in that case no petiole tube object is created and leaves attach directly at the internode tip. Vertices are still computed so leaf orientation is well-defined.
+- Added `Phytomer::rotatePetiole(petiole_index, AxisRotation)` for solid-body rotation of a petiole and all leaves anchored to it (the terminal floral bud and its peduncle/inflorescence, anchored to the internode, are unaffected). Pitch rotates about the stored `petiole_rotation_axis` using the construction-time `abs(pitch)` convention, yaw rotates about the internode axis, and roll rotates about the petiole's current length axis. Used internally by the sorghum flag-leaf rule, which now sets the terminal phytomer petiole pitch to a small non-zero value (5°) to keep the rotation axis well-defined and applies an additional +25° solid-body petiole rotation so the flag leaf clears the panicle.
+- Reworked leaf orientation on curved stems: the legacy roll term `(acos(internode_axis.z) − roll)` is removed and replaced by a curvature-aware blade-up correction applied after the pitch/yaw chain. The leaf is rolled about its own length axis (the petiole tip axis) by an angle scaled by `min(petiole_length / leaf_size, 1)` and clamped below 90°, so leaves on long petioles hang at their natural angle while leaves that hug the stem follow stem curvature. Also fixed leaf-wave vertex displacement to be applied along the post-rotation surface normal rather than along world Z, so wave bumps no longer flatten visually past the buckle.
+- Tightened maize and sorghum library parameters: widened phyllotactic angle (170–190° → 155–205°), increased leaf buckle angles, increased sorghum wave amplitude, lengthened maize wave period (0.1 → 0.15), and relaxed sorghum gravitropic curvature (−1000…−400 → −800…−200) for less-extreme stem droop.
+
+## Leaf Optics
+- Added Fluspect-B SIF parameters `V2Z` (violaxanthin↔zeaxanthin de-epoxidation state) and `fqe` (intrinsic fluorescence quantum efficiency scalar) to `LeafOpticsProperties` and `LeafOpticsProperties_Nauto`. They are ignored by the PROSPECT reflectance/transmittance calculation; on every `LeafOptics::run()` call (and per-bin in the nitrogen-auto path), Helios now writes an 11-element `fluspect_biochem_<label>` global-data vector containing `[Cab, Cca, Cw, Cdm, Cs, Cant, Cp, Cbc, N, V2Z, fqe]` and stamps the primitive data label `fluspect_spectrum` on processed UUIDs so the radiation plug-in's SIF pipeline can identify fluorescing leaves and look up their biochemistry by label.
+
+## Photosynthesis
+- Added an implementation of the von Caemmerer (2021) steady-state C4 photosynthesis model, exposed via `setModelType_C4()` and a new `C4ModelCoefficients` struct that mirrors the C3 Farquhar API (four temperature-response setter overloads per rate parameter `Vpmax`/`Vcmax`/`Jmax`/`Rd`/`gm`, plus directly-editable kinetic constants and structural scalars). Includes a fail-fast species library (`SetariaViridis_vC2021`, `GenericC4_vC2000`, `Maize_Massad2007`) accessed via `setC4CoefficientsFromLibrary()`, per-UUID and per-material coefficient assignment with full material-data serialization, a `setCm()` override for direct mesophyll-CO2 prescription (testing/validation against the paper's reference spreadsheet), and new optional output primitive data `Cm` (mesophyll cytosolic CO2) and `Vp` (PEP carboxylation rate). The `limitation_state` output uses 1 = enzyme-limited and 2 = electron-transport-limited for the C4 model.
+- Added mesophyll conductance `gm` to the Farquhar C3 model via four `setMesophyllConductance_gm()` overloads on `FarquharModelCoefficients` (constant / Arrhenius / peaked / peaked+dHd) with the same temperature-response framework as the other rate parameters. When `gm` is finite, net assimilation is obtained by solving the Ethier & Livingston (2004) / Sharkey et al. (2007) quadratics derived from `Cc = Ci - A/gm` for the Rubisco- and electron-transport-limited branches; the default value is +infinity, which short-circuits to the legacy `Cc ≡ Ci` path and reproduces the original Farquhar `A` bit-for-bit so existing code and parameter libraries that do not set `gm` are unaffected.
+
+## Radiation
+- Added a solar-induced chlorophyll fluorescence (SIF) modelling pipeline to `RadiationModel`, exposed through a new SIF camera type. Users add a camera via `addSIFCamera()` (taking a list of user-defined emission bands, a `SIFCameraProperties` struct with `excitation_bin_width_nm` and `excitation_scattering_depth`, and standard camera geometry); `isSIFCamera()` queries whether a label was registered as SIF. Helios auto-creates internal excitation bands spanning 400–750 nm at the requested bin width, ray-traces them to populate per-leaf APAR (with optional inter-leaf scattering when the user wants accurate NIR APAR), evaluates a per-leaf Fluspect-B excitation→emission kernel (Vilfan 2016, ported in `FluspectB.cpp`) cached by biochemistry label + bin width, scales by the van der Tol (2014) rate-coefficient quantum yield Φ_F (read from `electron_transport_ratio` and `temperature` primitive data), integrates per emission-band wavelength range, and injects the resulting per-leaf top/bottom source flux (Mf/Mb) into the standard `runBand()` emission loop so escape and reabsorption are 3D-faithful. Excitation bands are piggy-backed onto regular non-SIF dispatches when present, and cached APAR is invalidated when radiative properties change. SIF-flagged emission bands bypass the Stefan-Boltzmann ε+ρ+τ=1 check (still enforcing ρ+τ ≤ 1) and skip the broadband σ·ε·T⁴ fallback for primitives without an SIF source flux, so non-emitting primitives (ground, sensors) do not inject thermal energy into visible/red SIF bands. Each emission band is locked to one excitation bin width — re-flagging it from a second camera with a different width is an error.
+- CMake now disables the Vulkan radiation backend (rather than emitting an unresolvable `-lvulkan` linker flag that broke downstream linking) when no Vulkan loader is installed on Linux/macOS, with a status message pointing at the appropriate install command.
+- `VulkanComputeBackend::copyScatterToRadiation()` now sizes the scatter→radiation memcpy by `launch_band_count` rather than the global `band_count`, fixing an OOB read crash whenever a `runBand` dispatch is a strict subset of all bands (e.g., a SIF emission-only dispatch following an excitation-band dispatch that raised the global band count).
+- `addRadiationCamera()` now warns once per camera (aggregated across all bound bands) when a camera is bound to a band with `scatteringDepth == 0`, since camera pixels for that band would otherwise read as zero with no diagnostic.
+- Spectral-camera auto-exposure now anchors to the 95th percentile mapped to ~0.7 instead of the median mapped to 0.18, so narrow scientific bands (fluorescence, thermal IR, Fraunhofer-line retrievals) where most of the frame reads near zero no longer drive the gain to astronomical values and saturate the subject.
+- `runBand()` now skips cameras whose bound bands don't intersect the current dispatch, avoiding wasted full-camera launches when (e.g.) running PAR with a SIF camera registered.
+- BVH traversal kernels (`traverse_bvh`, `traverse_cwbvh`) drop the unused `hit_prim_type` and `hit_uv` outputs and the corresponding leaf-data load in cwBVH, removing dead reads from every camera/diffuse/direct/pixel-label raygen path.
+
+## Visualizer
+- Fixed `colorContextPrimitivesByObjectData()` (no-arg overload) so that orphan primitives (those with no parent compound object) are colored by the colormap at value 0 — matching the existing behaviour for compound-object primitives whose parent object lacks the data label, and matching the behaviour of `colorContextPrimitivesByData()` for primitives without primitive data. Previously orphans were rendered with their base RGBA, which left ground tiles and other standalone primitives showing through as their default color (e.g., the green from `Context::addTile`) instead of participating in the colormap.
+- Colorbar ticks are now filtered to the colorbar's `[cmin, cmax]` range (with a small epsilon) before placement, so a fixed-range colorbar no longer shows orphan labels at "nice" tick values that `generateNiceTicks()` extends past the data range.
+
+# [1.3.71] 2026-04-14
+
+## Core
+- OBJ loader now generates unique material names when loading multiple OBJ files with colliding MTL material names (e.g., Blender's default "Material.001"), instead of silently reusing the first registered material.
+- Added `Context::updateTimeseriesData()` method to modify the value of an existing timeseries data point, identified by its (Date, Time) key. Throws a runtime error if the variable or specified timestamp does not exist.
+- `helios::writeEXR()` now maps common channel name aliases (`red`/`green`/`blue`/`alpha`, case-insensitive) to the standard EXR channel names `R`/`G`/`B`/`A` so that images written with descriptive band labels are recognized as RGB by external EXR viewers.
+
+## Plant Architecture
+- Added `writePlantStructureUSD()` method to export plant structures as USDA files with PhysX articulated rigid bodies for NVIDIA IsaacSim physics simulation. Each tube segment becomes a capsule-shaped rigid link connected by spherical joints whose local frames encode the rest-pose orientation (zero joint angle reproduces the authored pose), with spring/damper drives derived from beam bending stiffness. Visual meshes use smooth area-weighted faceVarying normals and indexed primvars, materials are nested under the default prim, and a single shared angular drive replaces the previous per-axis rotX/rotY drives.
+- Added `registerGrowthFrame()`, `writePlantGrowthUSD()`, `clearGrowthFrames()`, and `getGrowthFrameCount()` methods to capture per-step plant geometry snapshots and export them as a time-sampled USDA animation for Blender. Organs that appear during growth are toggled visible via scale/visibility keyframes, with step-style hold keyframes preventing interpolation between growth frames.
+- Fixed `readPlantStructureXML()` to use the plant instance's base position instead of the origin when reconstructing the first internode of the base shoot.
+- Fixed operator-precedence bug in `random_float()` helper used by Cowpea phytomer generation, where `RAND_MAX / (max - min)` was being divided before the cast instead of after, producing skewed random ranges.
+- Floral bud `age` is now tracked from the time of bud break and written as object data on inflorescence and peduncle objects (when the `age` output is enabled), so flower/fruit organs report a meaningful age rather than inheriting the parent phytomer's age.
+
+## Leaf Optics
+- `LeafOptics::run()` now assigns spectra to newly added primitives within an existing object, instead of skipping them when the object's nitrogen content has not changed enough to trigger a bin reassignment.
+
+## Photosynthesis
+- Reformulated TPU limitation in the Farquhar model to compare at the assimilation level (`A_TPU = 3*TPU - Rd`) rather than via `Wp = 3*TPU*Ci/(Ci - Gamma*)`, eliminating the singularity at `Ci = Gamma*` that produced non-physical assimilation values when intercellular CO2 approached the compensation point. Also fixed `evaluateCi_Farquhar()` to read `TPUflag` from the model coefficients struct instead of the (uninitialised) variables vector.
+
+## Plant Hydraulics
+- Fixed `computeCapacitance()` to use the first-derivative finite-difference stencil `(f2 - f0)/(2h)` instead of the second-derivative stencil `(f0 - 2f1 + f2)/h^2`, since hydraulic capacitance is defined as `Wsat / (dpsi/dw)`.
+- Fixed `setStemHydraulicConductanceTemperatureDependence()` to modify the stem conductance struct instead of the root conductance struct.
+- Fixed `setLeafHydraulicCapacitanceFromLibrary()` parameters: `PistachioFemale` had a positive (physically impossible) osmotic potential at full turgor and used Walnut's RWC at turgor loss; the unknown-species fallback claimed to be Walnut but used Western Redbud values.
+- Fixed per-primitive coefficient lookup in `updateLeafWaterPotentialsOfPlant()`, which indexed `modelcoeffs_map` by the loop counter instead of the primitive UUID, silently discarding any per-primitive coefficients set via `setModelCoefficients(coeffs, UUIDs)`.
+- Fixed non-steady-state leaf RWC update to divide the net flux by `saturated_specific_water_content`, so that leaves with a larger water reservoir respond more slowly (previously the dimensionless RWC was incremented by raw `mol/m^2` flux).
+- Fixed `computeConductance()` and `updateRootAndStemWaterPotentialsOfPlant()` convergence test to use `fabs()` instead of `abs()`, which on float arguments could resolve to the integer overload and truncate intermediate values (also caused `delta_psi` in the root/stem solver to be signed, allowing premature exit).
+- Added `setLeafHydraulicCapacitance()` overload that accepts an explicit `saturated_specific_water_content` argument.
+
+## Parameter Optimization
+- Added four new optimization algorithms: L-BFGS and BOBYQA (local, NLopt-backed), SLSQP (local constrained, NLopt-backed), and Adam/AdamW (noise-tolerant, no external dependency). The existing GA, BO, and CMA-ES algorithms are unchanged.
+- Added a composable gradient architecture (`GradientSource`, `makeGradientFunction()`, `makeFDGradientSource()`, `makeFDGradient()`) that lets users mix analytic/AD gradients with centered finite differences on a per-parameter basis, plus a `ConstrainedSimulation` overload that returns the objective, constraints, and all sensitivities in a single cached forward pass.
+- Added three new `ParameterOptimization::run()` overloads for gradient-based, constrained, and combined-simulation optimization, and an automatic default-algorithm selector chosen from parameter properties and the overload called.
+- NLopt 2.10.1 is now bundled under `plugins/parameteroptimization/lib/nlopt-2.10.1/` and built as a static library when CMake is configured; a system-installed NLopt is used as a fallback. If NLopt is unavailable, L-BFGS/BOBYQA/SLSQP are disabled and the remaining algorithms still build. Credit to Kyle Rizzo for developing the kernel-extraction/AD-enabling extensions.
+
+## Radiation
+- Added Basler acA2500-20gc (color, GigE) and acA2500-20gm (monochrome, GigE, base + 730 nm and 850 nm bandpass variants) to the camera library.
+- Fixed `RayTracingGeometry::validate()` to size shared per-primitive arrays (`primitive_types`, `transform_matrices`, `object_subdivisions`, `twosided_flags`, `solid_fractions`, `object_IDs`, `primitive_IDs`) by `primitive_count` only; bbox geometry is stored in its own `bboxes.UUIDs` / `bboxes.vertices` buffers, so the previous `primitive_count + bbox_count` expectations crashed validation in Debug builds with periodic boundaries enabled.
+- Vulkan backend now destroys the `band_map_buffer` during teardown, fixing a Vulkan resource leak on RadiationModel destruction.
+- `updateRadiativeProperties()` now writes reflectivity/transmissivity directly into the flat `material_data` buffers via index helpers, eliminating large nested `std::vector` temporaries (previously `O(Nsources * Nprimitives * Nbands * Ncameras)` of nested allocation followed by a redundant `flatten()` copy).
+- Camera output now records the actually applied exposure gain and white balance factors on the `RadiationCamera` and writes them to the camera metadata JSON, so downstream tools can recover the linear-radiance scaling that was applied to a saved image.
+- Fixed `blendSpectra()` weight-sum check to allow floating-point rounding (tolerance `1e-5`) instead of requiring exact equality to 1, which previously rejected mathematically valid weight combinations.
+
+## Visualizer
+- Fixed `addPoint()` argument list, which was passing the point size into the wrong parameter slot of `GeometryHandler::addGeometry()` after a recent signature change.
+
+## Build System
+- CMake now checks at configure time that the installed CUDA Toolkit version does not exceed the NVIDIA driver's supported CUDA version, preventing cryptic `OPTIX_ERROR_INVALID_INPUT` failures at runtime due to incompatible device code.
+
+# [1.3.70] 2026-03-19
+
+## Plant Architecture
+- `deletePlantInstance()` now cleans up hidden prototype primitives from the Context when all plant instances have been deleted, preventing orphaned hidden primitives and materials that could never be freed. Added optional `include_hidden` parameter to `getAllPlantUUIDs()` to allow querying hidden prototype primitives.
+
+## Radiation
+- Fixed camera pixel label UUID mapping where the CPU-side conversion from internal primitive indices to Helios UUIDs produced incorrect labels when `buildGeometryData` reordered primitives by parent object. The GPU intersection programs already store actual UUIDs directly, so the redundant conversion was removed.
+
+## Build System
+- CMake now verifies that the CUDA language can actually be enabled (e.g., Visual Studio MSBuild integration is installed) before attempting a GPU build in the radiation, collision detection, and energy balance plugins, preventing cryptic build failures when the CUDA toolkit is installed without Visual Studio integration.
+- Bundled Vulkan SDK headers and glslang 16.2.0 shader compiler source with the radiation plugin.
+
+# [1.3.69] 2026-03-16
+
+## Core
+- Removed redundant `setColor()` call in `addConeObject()` that was re-applying the color already set on individual triangles during construction.
+
+## Plant Architecture
+- Renamed generic `Material.002` material in `PetiolulePrototype` OBJ/MTL assets to descriptive `petiolule` label.
+
+## Radiation
+- Removed bundled OptiX 5.1 libraries and headers (linux64-5.1.0, windows64-5.1.1) and all legacy `OPTIX_VERSION_LEGACY` CMake code paths, since OptiX 5.1 support was superseded by OptiX 6.5 and 8.1 backends.
+- Fixed multi-tile camera rendering in the OptiX 8 backend where `__raygen__camera()` and `__raygen__pixel_label()` used per-tile resolution instead of full image resolution for ray direction computation, causing black pixels in tiles beyond the first (e.g., iPhone 12 Pro Max at 3024×4032 with 100 AA samples).
+- Fixed camera closest-hit for triangle primitives in the OptiX 8 backend to use the intersection program's face attribute instead of recomputing the surface normal from canonical patch vertices, which produced incorrect face orientation and black triangle pixels.
+- Fixed camera pixel buffer zeroing in the OptiX 6 backend so that multi-tile renders for the same camera accumulate correctly rather than re-zeroing between tiles.
+- Specular reflection was missing in OptiX 8 camera rendering path: camera-weighted source fluxes are now uploaded and specular contributions are accumulated per-camera in the direct miss program.
+
+# [1.3.68] 2026-03-15
+
+## Core
+- OBJ loader now registers MTL materials in the Context material system and assigns them to loaded primitives, enabling material-based queries and rendering workflows for imported OBJ meshes.
+- Added `renameMaterial()` method to allow renaming material labels while preserving all properties and deduplication aliases for auto-generated materials.
+- Added `clearTimeseriesData()` method to remove all timeseries variables and their associated date/time values from the Context.
+
+## Plant Architecture
+- Plant organ materials (stems, petioles, leaves, flowers, fruit, peduncles) are now given descriptive names based on plant name and shoot type (e.g., "bean_trifoliate_leaf") instead of opaque auto-generated hash labels.
+- Added `setProgressCallback()` method to `PlantArchitecture` for receiving real-time `(float progress, std::string message)` updates during `advanceTime()` and `adjustFruitForObstacleCollision()`, enabling GUI and Python binding integration. Added `setCallback()` to `ProgressBar` to support this.
+
+## Visualizer
+- Reverted colorbar tick clamping that was incorrectly removing valid tick marks at the data range boundaries.
+
+# [1.3.67] 2026-03-11
+
+## Radiation
+- Replaced compile-time backend selection with runtime GPU hardware probing: the radiation model now auto-detects the best available backend (OptiX 8 → OptiX 6 → Vulkan) at startup, with clear diagnostic errors when no compatible GPU is found.
+- Bundled Vulkan headers and the glslang shader compiler with the plugin, eliminating the requirement to install the Vulkan SDK on all platforms (Windows now has zero external Vulkan dependencies).
+
+# [1.3.66] 2026-03-05
+
+## Core
+- Added `writeEXR()` functions for writing single-channel and multi-channel float images to OpenEXR files with lossless ZIP compression, using the tinyexr header-only library.
+
+## Radiation
+- Added `writeCameraImageDataEXR()` and `writeDepthImageDataEXR()` methods for exporting camera and depth data to EXR files, preserving full floating-point precision.
+
+## Visualizer
+- Fixed bug in colorbar ticks where ticks could extend past the colorbar.
+
+## Radiation
+- Added OptiX 8.1 ray tracing backend for NVIDIA systems with driver ≥ 560. This resolves the driver 590+ incompatibility that prevented the OptiX 6.5 backend from working on modern NVIDIA drivers. The backend is selected automatically at build time: driver ≥ 560 uses OptiX 8.1; driver < 560 continues to use OptiX 6.5.
+
+# [1.3.65] 2026-02-27
+
+## Core
+- Expanded `loadTabularTimeseriesData()` to support combined "datetime" columns (ISO-8601 with timezone offsets, compact YYYYMMDDHH/YYYYMMDDHHMM, space-separated date+time), a "time" column (HH:MM, HH:MM:SS), compact 8-digit date strings, and date format synonyms (e.g., "YYYY-MM-DD", "DD/MM/YYYY").
+- Fixed `Tube::pruneTubeNodes()` to correctly partition and delete primitives using the proper UUID ordering, and fixed `Tube::updateTriangleVertices()` loop order to match `addTubeObject()` so that colors stay mapped to the correct segments.
+
+## Radiation
+- Added Vulkan compute backend with software BVH traversal, enabling GPU-accelerated ray tracing on AMD, Intel, and Apple Silicon GPUs without requiring CUDA or OptiX. Backend selection is now automatic based on available hardware, with `FORCE_VULKAN_BACKEND` CMake option for testing. The OptiX backend now handles its own launch batching internally rather than in `RadiationModel`. Tile sub-patches are treated as individual patches for cross-backend compatibility, and the Prague sky model parameters are now properly passed to all backends.
+
+## Parameter Optimization
+- Major overhaul: added Bayesian Optimization (Gaussian Process with UCB acquisition) and CMA-ES algorithms alongside the existing Genetic Algorithm. New `setAlgorithm()` API replaces the old `OptimizationSettings` struct, with configurable crossover operators (BLX-alpha, BLX-PCA), mutation operators (per-gene, isotropic, hybrid PCA), integer/categorical parameter types, fitness caching, and `explore()`/`exploit()` factory presets for each algorithm.
+
+## Plant Hydraulics
+- Fixed sign error in turgor pressure term of the water potential equation in the documentation.
+
+## LiDAR
+- Updated multi-return triangulation filter documentation to reflect first-return filtering and corrected separation ratio threshold.
+
+# [1.3.64] 2026-01-30
+
+## Core
+- Added non-throwing path resolution functions `tryResolveFilePath()` and `tryResolvePluginAsset()` that return empty paths instead of throwing exceptions when files are not found.
+
+## Plant Architecture
+- Refactored `resolveTextureFile()` to use non-throwing path resolution functions, eliminating exception handling for file probing.
+- Added overloaded `PlantArchitecture::getPlantInternodeObjectIDs()` that can take a shoot type label string in order to only get object IDs for that shoot type.
+
+## Radiation
+- Refactored ray tracing architecture with backend abstraction layer to enable future support for OptiX 7.7 and Vulkan backends while maintaining backward compatibility with OptiX 6.5. This is a major overhaul, but should be fully backward compatible - please report any errors you encounter.
+- Added type-safe buffer indexing utilities (`BufferIndexing.h`, `IndexTypes.h`) to eliminate manual index calculations and prevent indexing errors in multi-dimensional GPU buffers.
+
+# [1.3.63] 2026-01-21
+
+## Core
+- Updated docs to be mobile friendly with slide-out sidebar navigation and hamburger menu.
+
+## LiDAR
+- Removed direct CUDA dependency; ray tracing now uses the CollisionDetection plugin for GPU acceleration.
+- Renamed `calculateLeafAreaGPU()` to `calculateLeafArea()` (old methods deprecated but still available).
+- Added `enableGPUAcceleration()` and `disableGPUAcceleration()` methods to control CollisionDetection GPU usage.
+- Added adaptive triangulation filtering for multi-return data using separation ratio thresholds.
+- Improved `gapfillMisses()` to track filled grid positions and avoid duplicate gap-filled points.
+
+## Plant Architecture
+- Refined carbohydrate model with new parameters for structural vs non-structural carbon tracking (`carbohydrate_percentage`, `stem_structural_carbon_percentage`, `living_wood_fraction`, `dormant_respiration_fraction`) and separate upward/downward transfer thresholds.
+- Added `vegetative_bud_break_probability_max` parameter to ShootParameters for controlling maximum bud break probability.
+- Added `updateShootFruitCounts()` and `getShootInternodeObjectIDs()` methods.
+- Added additional internode object data outputs for carbon model diagnostics (`carbohydrate_pool_molC`, `daily_net_photosynthesis`, `daily_respiration`, `daily_growth`).
+- Added two new almond tree model variants: `almond_aldrich` and `almond_wood_colony`.
+
+# [1.3.62] 2026-01-12
+
+## Core
+- Fixed `Tube::appendTubeSegment()` to correctly add triangles for new segments using proper vertex indices instead of hardcoded values.
+- Refactored `readPNGAlpha()` to use RAII patterns for proper resource management and added PNG signature validation.
+- Fixed `cart2sphere()` singularity when converting vectors pointing straight up or down (gimbal lock), which caused camera orientation issues.
+
+## Voxel Intersection
+- The voxel intersection plug-in has been deprecated. Use the collision detection instead.
+
+## Collision Detection
+- All functionality from the voxel intersection plug-in has been incorporated in the collision detection plug-in. This also includes an OpenMP fallback if no GPU is available.
+
+## Photosynthesis
+- Added `electron_transport_ratio` (J/Jmax) as optional output primitive data for computing fluorescence quantum yield.
+
+## Plant Architecture
+- Added `listShootTypeLabels()` method with three overloads to discover available shoot types: query the currently loaded model (no parameters), query any model by name (string parameter), or query a plant instance by ID (uint parameter).
+- Added `resolveTextureFile()` static method for simplified asset path resolution when loading textures and OBJ models.
+- Updates to pistachio and walnut model parameters.
+- Fixed nitrogen model to track all leaves in the nitrogen map even when no nitrogen is available in the pool.
+
+## Leaf Optics
+- Added optional primitive data output for biochemical properties (chlorophyll, carotenoid, etc.) when using nitrogen-based automatic mode.
+
+## Radiation
+- Fixed horizontal mirroring in camera output functions: `writePrimitiveDataLabelMap()`, `writeObjectDataLabelMap()`, `writeImageBoundingBoxes()`, `writeImageSegmentationMasks()`, `writeCameraImage()`, and related methods.
+- Refactored COCO annotation generation in `writeImageSegmentationMasks_ObjectData()` to ensure 1:1 correspondence between annotations and their attribute values.
+- Fixed `runBand()` to validate band labels from the input parameter rather than an internal variable, which caused incorrect error messages when invalid bands were passed.
+
+# [1.3.61] 2025-12-17
+
+## Core
+- Fixed CMake linkage visibility for `stdc++fs` library on older GNU compilers (< 9.0) by specifying `PRIVATE` visibility.
+- Added `compact` parameter to `WarningAggregator::report()` for single-line warning summaries.
+
+## Energy Balance
+- CUDA is now optional. Plugin uses three-tier execution: GPU (CUDA), OpenMP (parallel CPU), or serial CPU fallback. OpenMP is recommended for most workloads.
+- Added `enableGPUAcceleration()`, `disableGPUAcceleration()`, and `isGPUAccelerationEnabled()` methods to control GPU usage at runtime (only available when compiled with CUDA).
+
+## Collision Detection
+- Added runtime warning when OpenMP is not available, recommending its installation for better performance.
+
+## Plant Architecture
+- Added nitrogen model for simulating nitrogen uptake, allocation, remobilization, and stress effects on plant growth. Uses area-based nitrogen tracking (g N/m²) with three-level pool structure (root → available → per-leaf). Calculates nitrogen stress factor (0-1) for use by other plugins.
+
+## Leaf Optics
+- Added nitrogen-based automatic leaf optics mode that computes chlorophyll and carotenoid content from leaf nitrogen concentration. Uses adaptive binning to limit computational overhead while maintaining spectral fidelity across nitrogen gradients. Integrates with PlantArchitecture nitrogen model via `leaf_nitrogen_gN_m2` object data. 
+
+# [1.3.60] 2025-12-08
+
+## Core
+- Added vector-scalar arithmetic operators for `std::vector<float>` to enable element-wise operations: addition (`vec + scalar`, `scalar + vec`), subtraction (`vec - scalar`, `scalar - vec`), multiplication (`vec * scalar`, `scalar * vec`), and division (`vec / scalar`, `scalar / vec`).
+- Fixed an issue with shared materials. If duplicate materials were merged, and the color/texture/etc. is changed for a subset of primitives, all primitives sharing that merged material would be affected.
+
+## Photosynthesis
+- Added `setCi()` method to manually override intercellular CO2 concentration for specified primitives, bypassing the normal iterative calculation that couples photosynthesis with stomatal conductance. This feature is primarily intended for testing and validation purposes.
+- CRITICAL BUG: Fixed bug in `evaluateFarquharModel()` where incorrect variable name was used when calling `fzero()`. This could result in parameters reverting to the default values in certain cases.
+- Added check for Farquhar `Topt` parameters to catch instances where users specify them in units of Kelvin instead of Celsius.
+
+## Plant Architecture
+- Substantially refactored XML reading/writing to avoid writing position and orientation vectors to XML. Instead, they are auto-computed based on bulk parameters.
+
+## Radiation
+- Added zoom parameter to the radiation camera parameters structure. By default zoom is 1x, so should be backward compatible.
+- Added lens flare model to radiation camera.
+- Radiation sources are now rendered in the radiation camera images if in view of the camera.
+
+# [1.3.59] 2025-12-02
+
+## Core
+- Removed public object pointer getter methods (`getObjectPointer()`, `getTileObjectPointer()`, `getSphereObjectPointer()`, `getTubeObjectPointer()`, `getBoxObjectPointer()`, `getDiskObjectPointer()`, `getPolymeshObjectPointer()`, `getConeObjectPointer()`) to enforce encapsulation. Users should use the existing public getter/setter methods for object properties instead.
+- Added `scaleConeObjectLength()` and `scaleConeObjectGirth()` methods to scale Cone object dimensions without requiring direct pointer access.
+- Added `getGlobalDataVersion()` method for detecting when global data has been modified.
+
+## Leaf Optics
+- Added `optionalOutputPrimitiveData()` method to selectively control which biochemical properties are written as primitive data, improving performance when only specific properties are needed.
+
+## Solar Position
+- Added Prague Sky Model interface for computing physically-based sky radiance distributions: `enablePragueSkyModel()`, `updatePragueSkyModel()`, `isPragueSkyModelEnabled()`, `pragueSkyModelNeedsUpdate()`. The model accounts for Rayleigh and Mie scattering to produce spectral-angular sky radiance parameters stored in Context global data.
+
+## Radiation
+- Moved Prague Sky Model from radiation plugin to solar position plugin; radiation now reads pre-computed Prague spectral parameters from Context global data.
+- Changed `setDiffuseSpectrum()` to apply globally to all bands (existing and future) rather than per-band.
+- Adopted `WarningAggregator` for property validation warnings during radiative property updates.
+
+## Collision Detection
+- Adopted `WarningAggregator` for BVH construction and collision detection warnings.
+
+## Energy Balance
+- Adopted `WarningAggregator` for air energy balance warnings; removed debug print statements.
+
+## Voxel Intersection
+- Adopted `WarningAggregator` for primitive slicing warnings; replaced manual error throws with `helios_runtime_error()`.
+
+# [1.3.58] 2025-11-28
+
+## Core
+- Added materials to avoid duplicating surface-level data. This Phase 1 implementation focused only on the primitive/object color or texture.
+- Added `WarningAggregator` class, a thread-safe utility for aggregating repetitive warnings to prevent console flooding when processing large numbers of primitives. Used throughout core functions like `fzero()`, `incrementPrimitiveData()`, and `rotatePrimitive()` to collect and report warning summaries instead of per-iteration messages.
+
+## Plant Architecture
+- Users can now configure canopy-level plant parameters, such as trellis dimensions, number of tree scaffolds, etc.
+- Added support for "all" keyword in `optionalOutputObjectData()` to enable all optional output data fields simultaneously (case-insensitive). Invalid data labels now throw `helios_runtime_error` instead of printing warnings.
+
+## Radiation
+- Added camera library with pre-configured real-world cameras including intrinsic parameters and manufacturer-measured spectral response curves. Library includes Canon EOS 20D, Nikon D700, Nikon D50, Apple iPhone 11, and Apple iPhone 12 Pro Max with full spectral response data for RGB channels.
+- Added `addRadiationCameraFromLibrary()` method to create cameras directly from library entries, automatically loading all camera properties, spectral responses, and creating radiation bands if needed. Supports custom band name mapping.
+- Enhanced camera metadata with lens properties (make, model, specification), exposure settings (mode, shutter speed), white balance mode, and agronomic properties (plant species, counts, heights, phenological stages, leaf area). Metadata now includes image_processing parameters when `applyCameraImageCorrections()` is applied.
+- Added `updateCameraParameters()` and `getCameraParameters()` methods for runtime modification and retrieval of camera intrinsic parameters.
+- Added automatic exposure and white balance application during rendering based on camera settings. New `applyCameraExposure()` and `applyCameraWhiteBalance()` methods are called automatically. Supports "auto", "manual", and ISO-based exposure modes (e.g., "ISO100") calibrated to match auto-exposure at reference settings.
+- Enhanced metadata API with `enableCameraMetadata()` and `getCameraMetadata()` methods for better control over automatic JSON metadata export alongside camera images.
+- Renamed `applyImageProcessingPipeline()` to `applyCameraImageCorrections()` for clarity. Old method is deprecated but still functional for backward compatibility.
+- Fixed camera ray generation pixel coordinate calculations when using camera tiling. Now correctly computes global pixel coordinates using `camera_pixel_offset_x`, `camera_pixel_offset_y`, and `camera_resolution_full` variables in OptiX kernel.
+
+## Stomatal Conductance
+- Model parameters can now be set on a per-material basis
+
+## Photosynthesis
+- Model parameters can now be set on a per-material basis
+- `twosided_flag` is now managed as part of materials
+
+## Boundary-layer Conductance
+- `twosided_flag` is now managed as part of materials
+
+## Visualizer
+- Fix to a visualizer test that was causing a segmentation fault when tests are run in non-headless mode
+
+##	Solar Position
+- Implemented SSolar-SOA model to predict full solar spectrum as a function of atmospheric conditions
+
+# [1.3.57] 2025-11-18
+
+## Radiation
+- **NEW FEATURE:** Integrated Prague Sky Model for physically-based atmospheric sky radiance in camera rendering. When camera "miss" rays don't hit any geometry, sky radiance is now computed using the advanced atmospheric physics model from Wilkie et al. (ACM SIGGRAPH 2021, CGF 2022) based on Rayleigh and Mie scattering.
+- Prague Sky Model data file (27 MB) and Apache 2.0 license added to `plugins/radiation/spectral_data/prague_sky_model/`
+
+## Solar Position
+- Clarified turbidity parameter documentation across all methods to explicitly state it represents Ångström's aerosol turbidity coefficient (β), which is aerosol optical depth (AOD) at 500 nm wavelength
+- Updated documentation for `setAtmosphericConditions()`, `getAtmosphericConditions()`, `getSolarFlux()`, `getSolarFluxPAR()`, `getSolarFluxNIR()`, and `getDiffuseFraction()` to include typical turbidity values and clarify the difference from Linke turbidity.
+
+## Leaf Optics
+- Added built-in species library with pre-configured optical properties for common plant species to simplify model usage and eliminate the need to manually specify PROSPECT-D biochemical parameters
+- Added `LeafOptics::getPropertiesFromLibrary()` method to populate `LeafOpticsProperties` structures with species-specific PROSPECT-D parameters. The method accepts case-insensitive species names (e.g., "corn", "CORN", "Corn" are equivalent) and gracefully falls back to default values with a warning if an unknown species is provided.
+- Species library includes 11 species fitted to LOPEX93 spectral library samples using robust optimization: default (original Helios defaults), garden_lettuce, alfalfa, corn, sunflower, english_walnut, rice, soybean, wine_grape, tomato, common_bean (from GEMINI field experiments), and cowpea (from GEMINI field experiments)
+- All species use PROSPECT-D mode with fitted parameters for numberlayers (N), chlorophyllcontent (Cab), carotenoidcontent (Car), anthocyancontent (Ant), brownpigments (Cbrown), watermass (Cw), and drymass (Cm)
+
+## Plant Architecture
+- Added `PlantArchitecture::determinePhenologyStage()` method to determine if a plant is in dormant, vegetative, reproductive, or senescent phenological stage based on the presence and state of floral buds and leaf senescence
+- Added optional object data output fields for improved plant identification and analysis: `plant_name` (string), `plant_height` (float), `plant_type` (string: "herbaceous", "deciduous", or "evergreen"), and `phenology_stage` (string: "dormant", "vegetative", "reproductive", or "senescent")
+- Plant type classification (herbaceous, deciduous, evergreen) is now tracked internally via `plant_type_map` and automatically set during plant model registration, enabling proper phenological stage determination and classification
+- Fixed bug when generating plant from XML, caused by not re-generating prototype models
+
+## Visualizer
+- Fixed bug where navigation gizmo would not reappear after calling `Visualizer::displayImage()` followed by `Visualizer::buildContextGeometry()`. The gizmo's enabled state is now tracked and properly restored when building geometry.
+
+# [1.3.56] 2025-11-12
+
+- Made a change to `.clang-format` to not sort header includes, which was persistently causing issues in the project builder plug-in
+
+## Core
+- Fixed critical bug in `Texture::computeSolidFraction()` where triangle winding order (clockwise vs counter-clockwise) was not handled correctly. The half-space test for point-in-triangle determination assumed counter-clockwise winding, causing all pixels in clockwise-wound triangles to be rejected, resulting in zero solid fraction values. Now uses shoelace formula to detect winding order and flip half-space coefficients as needed.
+- Fixed bug in `Context::copyPrimitive()` for textured triangles where solid fraction was incorrectly recalculated using geometric area instead of being directly copied from the source primitive. This caused zero solid fractions to perpetuate through primitive copying operations.
+- Fixed bug in `Context::addTubeObject()` where very small or zero radii at tube ends created degenerate triangles with near-zero surface area, generating numerous warnings. Now clamps radii to a minimum threshold (1e-5) that is large enough to avoid degenerate triangles but small enough to appear as a point visually.
+- Fixed bug in `validateOutputPath()` where directory paths without trailing slashes were not properly handled. Now ensures directory paths always end with a trailing slash for consistent path concatenation behavior. Added regression test for this fix.
+
+## CanopyGenerator
+- Fixed incorrect triangle winding order in VSP grapevine `leafPrototype()` function. The bottom half of leaves (y<0) had reversed vertex ordering, causing normals to point in the opposite direction from the top half. Both halves now use consistent counter-clockwise winding order following the right-hand rule.
+
+## Plant Architecture
+- Fixed bug where child shoot insertion angles were incorrect when using multiple petioles per internode. The angular offset calculation now properly accounts for the number of petioles per internode rather than the number of axillary buds. Added regression test for this fix.
+- Added comprehensive support for exact geometry restoration from XML files:
+  - Added `Phytomer::scalePetioleGeometry()` method to restore exact petiole dimensions that may differ from parameter-based values
+  - Added `PlantArchitecture::comparePlantGeometry()` debugging method for validating XML read/write operations by comparing geometry between original and loaded plants
+  - Inflorescence rotation parameters (pitch, yaw, roll, azimuth, peduncle_axis) are now stored in `FloralBud::inflorescence_rotation` and restored from XML
+  - Individual flower/fruit base scales are now stored in `FloralBud::inflorescence_base_scales` and restored from XML
+  - Peduncle radii are now stored alongside vertices in `Phytomer::peduncle_radii` for exact reconstruction
+  - Refactored inflorescence geometry creation into `Phytomer::createInflorescenceGeometry()` helper method to enable deterministic reproduction during XML restoration
+- Made `RandomParameter` distribution members (`distribution`, `distribution_parameters`) public to support XML serialization
+- Optimized all parameter assignment operators to check if distribution is constant before resampling, avoiding unnecessary random number generation
+- Fixed peduncle curvature calculation to bend toward or away from vertical axis using horizontal bending plane, preventing incorrect curvature behavior when peduncle orientation changes
+- Fixed bug where peduncle vertices were not being updated when phytomer position was translated via `setPetioleBase()`
+
+## Radiation
+- Enhanced camera calibration to support multiple colorboards simultaneously in the same scene. `CameraCalibration::detectColorBoardType()` has been replaced with `CameraCalibration::detectColorBoardTypes()` which returns a vector of all detected colorboard types. The internal storage has been updated from a single vector to a map organized by colorboard type.
+- `CameraCalibration::getColorBoardUUIDs()` has been renamed to `CameraCalibration::getAllColorBoardUUIDs()` and made const. It now returns UUIDs from all colorboards in the scene.
+- `RadiationModel::autoCalibrateCameraImage()` now processes all colorboards in the scene for calibration, combining patches from multiple colorboards (e.g., DGK, Calibrite, SpyderCHECKR) to improve calibration accuracy when multiple colorboards are present.
+- Adding a colorboard of the same type now replaces the previous colorboard of that type with a warning message, rather than clearing all colorboards.
+- Added UTF-8 encoding compiler flag (`/utf-8`) for MSVC in CMakeLists.txt to properly handle Unicode characters in source files
+- Fixed Unicode em-dash characters in `RayTracing.cuh` comment headers by replacing with ASCII dashes to avoid encoding issues
+- Updated Calibrite ColorChecker Classic colorboard spectral data
+- Updated leaf surface spectral library with expanded spectral measurements
+- Added automatic JSON metadata export for camera images. When `RadiationModel::setCameraMetadata()` is called for a camera, a JSON metadata file is automatically written alongside the image when `RadiationModel::writeCameraImage()` is called. The metadata includes camera properties (resolution, focal length, aperture, sensor dimensions, model name), geographic location, acquisition date/time, and lighting conditions.
+- Added `RadiationModel::populateCameraMetadata()` method to automatically populate camera metadata from camera parameters and simulation context (date, time, location, lighting sources). Optical focal length, sensor dimensions, aperture f-stop, camera tilt angle, and light source type are all calculated automatically.
+- Added `CameraProperties::sensor_width_mm` parameter to specify physical sensor width in mm (default 35mm for full-frame sensors). This is used to calculate optical focal length when metadata is auto-populated.
+- Added `CameraProperties::model` parameter to specify camera model name (e.g., "Nikon D700", "Canon EOS 5D") for documentation purposes in exported metadata.
+- **BREAKING CHANGE:** `CameraProperties::FOV_aspect_ratio` is now deprecated and automatically calculated from `camera_resolution` to ensure square pixels (FOV_aspect_ratio = horizontal_resolution / vertical_resolution). Explicitly setting this parameter will trigger a warning and the value will be ignored.
+- Renamed `RadiationCamera::applyCameraSpectralCorrection()` to `RadiationCamera::whiteBalanceSpectral()` to better reflect its purpose as a spectral-based white balance method. The method now requires spectral response data and will throw an error if not available, rather than silently returning.
+- Removed `RadiationCamera::whiteBalanceAuto()` method. Image processing pipeline now uses `whiteBalanceSpectral()` for more consistent and physically-based white balance.
+
+## Visualizer
+- Fixed error causing line widths from `Visualizer::addLine` to be fixed at 1.0 regardless of the line width passed
+
+# [1.3.55] 2025-10-18
+
+## Core
+- Added `Context::setObjectDataFromPrimitiveDataMean()` method to calculate the mean of primitive data values across all child primitives of an object and set it as object data. Supports float, double, vec2, vec3, and vec4 data types. Only primitives with the specified data label are included in the calculation.
+- Improved XML formatting for vector global data types (vec2, vec3, vec4, int2, int3, int4) - now writes each value on a separate line with proper indentation for better readability instead of all values on one line
+
+## Visualizer
+- Fixed issue with navigation gizmo where it could be blocked by objects extending past the camera near plane by moving it closer to the near plane (z-position changed from 0.01 to -0.9999)
+
+## Leaf Optics
+- Added `LeafOptics::getPropertiesFromSpectrum()` methods to retrieve PROSPECT model parameters from primitives based on their assigned reflectivity spectra. Available as both single primitive and vector overloads. The method queries primitives for their "reflectivity_spectrum" data and assigns the corresponding PROSPECT parameters (chlorophyll, carotenoid, anthocyanin, water, etc.) as primitive data if the spectrum matches one generated by the LeafOptics instance.
+
+## Plant Architecture
+- Fixed a bug when `petioles_per_internode` is set to 0, which caused child shoot insertion angles to be incorrect. This caused major issues in the weed models "puncturevine" and "bindweed"
+- Fixed a bug where internodes that start out extremely small were only being scaled in the radius but not length. This caused major issues in the weed model "cheeseweed"
+- Improved `ShootParameters` documentation comments for `insertion_angle_tip` and `insertion_angle_decay_rate` for clarity
+
+## Radiation
+- Cleaned up camera_spectral_library.xml by removing duplicate copyright comments for Canon 20D, Nikon D700, Nikon D50, and SONY NEX-5N camera spectral data
+
+# [1.3.54] 2025-10-16
+
+## Radiation
+- Added automatic spectral interpolation methods for dynamic radiative property assignment:
+  - `RadiationModel::interpolateSpectrumFromPrimitiveData()` - Interpolates spectra based on primitive data values using nearest-neighbor selection
+  - `RadiationModel::interpolateSpectrumFromObjectData()` - Interpolates spectra based on object data values for all primitives in objects
+- Enhanced image segmentation mask with optional parameter to calculate and write mean values of specified primitive/object data labels as mask attributes
+
+## Visualizer
+- Fixed colorbar aspect ratio distortion that occurred when window aspect ratio changed - colorbar now maintains intended proportions across different window sizes
+- Added `colorbar_intended_aspect_ratio` member variable to track design proportions
+- Added `updateColorbar()` method to apply aspect ratio corrections during rendering
+- Fixed cascading deprecation warnings in `addSkyDomeByCenter()` by implementing the deprecated overload directly with appropriate warning message
+- Fixed issue with navigation gizmo where it could be blocked by objects extending past the camera near plane
+
+## Collision Detection
+- Enhanced GPU acceleration fallback handling to gracefully disable GPU mode when CUDA is unavailable at runtime instead of crashing
+- Added runtime device count check before attempting GPU memory allocation
+- GPU memory allocation failures now fall back to CPU-only mode with informative warnings instead of throwing fatal errors
+
+## Project Builder
+- Updated segmentation mask writing to reflect the new Radiation API changes above
+
 # [1.3.53] 2025-10-10
 
 # Visualizer

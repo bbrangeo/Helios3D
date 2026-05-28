@@ -16,105 +16,575 @@
  <tr><td>\ref ParameterOptimization()</td></tr>
  </table>
 
-
-
-\section POissues Known Issues
-Currently under construction.
-
 \section PO_Intro Introduction
-The Parameter Optimization plugin performs a genetic algorithm-based optimization on arbitrary parameters used in Helios simulations.
-The plugin takes in a function that defines the Helios simulation, a parameter structure that enumerates decision variables to optimize over, and a
-settings structure that sets algorithm options.
 
-\section PO_Algorithm Genetic Algorithm
+The Parameter Optimization plugin provides seven optimization algorithms for tuning parameters in Helios simulations. It covers the full spectrum from global derivative-free search to constrained gradient-based optimization.
 
-The optimization procedure implemented in this plugin is a simple but robust [**Genetic Algorithm (GA)**](https://www.geeksforgeeks.org/dsa/genetic-algorithms/).
-It is designed to explore the parameter space of Helios simulations to find the parameter set that **minimizes** a user-defined objective function.
-At a high level, the algorithm maintains a population of candidate solutions (parameter sets), which it evolves over multiple generations using biologically inspired operations:
+The plugin takes a user-defined simulation function, a set of named parameters with bounds, and (optionally) gradient and constraint functions. It solves the general problem:
 
-- **Initialization**: A population of individuals is randomly initialized within the user-specified parameter bounds. Optionally, a known best individual can be injected from a file.
-- **Evaluation**: Each individual in the population is evaluated using the user-supplied simulation function. The function must return a single float value, interpreted as the **cost** or **error** to minimize.
-- **Elitism**: The best-performing individuals (top 5% by default) are preserved unchanged into the next generation.
-- **Selection**: Parents are selected from the population using a nonuniform random selection (tournament selection).
-- **Crossover (Recombination)**: For each child, corresponding parameters from two parents are blended using the **BLX-α operator** (Eshelman & Shaffer, 1993), which samples new values uniformly from an extended range around the parent values.
-- **Mutation**: Each parameter has a probability of mutation, implemented as Gaussian noise added to the parameter value, scaled to 10% of the parameter's range.
-- **Clamping**: After crossover and mutation, parameter values are clamped within the user-defined bounds to ensure validity.
-- **Termination**: The algorithm terminates after a fixed number of generations.
+\f[
+\begin{aligned}
+\min_{\mathbf{x}} \quad & f(\mathbf{x}) \\
+\text{subject to} \quad & g_i(\mathbf{x}) \leq 0, \quad i = 1, \ldots, m \\
+& \mathbf{x}_{\min} \leq \mathbf{x} \leq \mathbf{x}_{\max}
+\end{aligned}
+\f]
 
-This approach allows robust global optimization of parameters even when the simulation function is nonlinear, non-differentiable, or noisy.
+where \f$f(\mathbf{x})\f$ is the objective function, \f$\mathbf{x}\f$ is the vector of parameters to optimize, \f$g_i\f$ are optional nonlinear inequality constraints, and \f$\mathbf{x}_{\min}, \mathbf{x}_{\max}\f$ are the parameter bounds.
 
-\section PO_Params Settings
-Genetic Algorithm Settings
-| Parameter   | Description                                                              | Default Value |
-| ----------- | -----------------------------------------------------------------------  | ----- |
-| Generations  | number of iterations the algorithm is run for                                 | 100  |
-| Population Size | number of individuals used to explore the objective function space         | 100  |
-| Elitism Rate   | fraction of best-performing individuals to be preserved unchanged into the next generation | 0.05 |
-| Crossover Rate   | fraction of cross-over, or mixing, of the parameters of parent individuals    | 0.5 |
-| Mutation Rate   | probability of mutation, or perturbation, of the parameters of generated child individuals | 0.1 |
+\subsection PO_QuickStart Quick Start
 
-\section PO_Example Examples
-
-A minimal working example is given below.
+The simplest usage requires only an objective function and a set of named parameters with bounds:
 
 \code{.cpp}
-#include "ParameterOptimization.h"
-using namespace helios;
+ParametersToOptimize params = {
+    {"x", {0.f, -5.f, 5.f}},   // {initial, min, max}
+    {"y", {0.f, -5.f, 5.f}}
+};
 
-// Define a function that contains any ordinary C++ or Helios simulation code and computes a singular float to minimize
-// Here, we attempt to minimize the error, or distance, from known parameter values
-float sim(const ParametersToOptimize& p) {
-    float error = 0.0f;
+auto objective = [](const ParametersToOptimize& p) {
+    float x = p.at("x").value, y = p.at("y").value;
+    return (x - 3.f) * (x - 3.f) + (y + 1.f) * (y + 1.f);
+};
 
-    error += std::fabs(p.at("Em_BMF").value - 5.f);
-    error += std::fabs(p.at("i0_BMF").value - 100.f);
-    error += std::fabs(p.at("k_BMF").value - 1000.f);
-    error += std::fabs(p.at("b_BMF").value - 7.f);
+ParameterOptimization opt;
+auto result = opt.run(objective, params);
+// result.parameters contains the optimized values
+// result.fitness contains the minimized objective value
+\endcode
 
-    return error;
-}
+Use \ref ParameterOptimization::setAlgorithm() to select the algorithm most appropriate for your problem (see \ref PO_WhichAlgorithm). In lieu of choosing one, sensible defaults are used based on parameter types and the \c run() overload called:
 
-int main() {
-    //Initialize the optimization class
-    ParameterOptimization popt;
+| \c run() overload | Has Discrete Params | # Params > 50 | Otherwise |
+|---|---|---|---|
+| \c run(objective, params) | GA | GA | CMA-ES |
+| \c run(objective, params, gradient) | GA | Adam | Adam |
+| \c run(objective, params, gradient, constraints) | \ref PO_PenaltyConstraints "See Below" | SLSQP | SLSQP |
 
-    //Initialize the parameter structure
-    ParametersToOptimize params;
+\section PO_WhichAlgorithm Choosing an Algorithm
 
-    //Set the parameters to optimize over using a map from string "name" to {initial_value, min_value, max_value}
-    params = {
-        {"Em_BMF",{10,0,100}},
-        {"i0_BMF",{10,0,1000}},
-        {"k_BMF",{1e5,0,20000}},
-        {"b_BMF",{0.5,0,100}}
+Use this decision guide to select the right algorithm for your Helios problem:
+
+\verbatim
+Has discrete params (INTEGER/CATEGORICAL)?
+  → GA (only option for discrete params)
+
+Has accurate, smooth gradients?
+  → L-BFGS (fastest convergence)
+  → SLSQP (if you also have nonlinear constraints)
+
+Has noisy gradients (e.g., finite differences on stochastic ray tracing)?
+  → Adam (noise-tolerant via momentum averaging)
+
+No gradients, need to polish a known good solution?
+  → BOBYQA (derivative-free local optimizer)
+
+No gradients, expensive evaluations, ≤15 params?
+  → Bayesian Optimization (most sample-efficient)
+
+No gradients, 5-50 params, non-separable?
+  → CMA-ES (self-tuning, learns landscape correlations)
+
+No gradients, 50+ params?
+  → Decompose the problem, or GA with large budget
+\endverbatim
+
+<b>Summary Table:</b>
+
+| Algorithm | Type | Gradients | Constraints | Discrete Params | NLopt (bundled) | Best For |
+|-----------|------|-----------|-------------|-----------------|----------------|----------|
+| GA | Global, derivative-free | No | Box only | Yes (INTEGER, CATEGORICAL) | No | Multimodal, discrete/mixed params |
+| BO | Global, derivative-free | No | Box only | No | No | Expensive, low-dim (d < 15) |
+| CMA-ES | Global, derivative-free | No | Box only | No | No | Non-separable, medium-dim (5-50) |
+| L-BFGS | Local, gradient-based | Required (clean) | Box only | No | Yes | Smooth unimodal with AD gradients |
+| Adam | Local, gradient-based | Required (noise-OK) | Box only | No | No | Noisy gradients (FD on ray tracing) |
+| BOBYQA | Local, derivative-free | No | Box only | No | Yes | Polish GA/CMA-ES result without gradients |
+| SLSQP | Local, gradient-based | Required | Nonlinear inequality | No | Yes | Constrained optimization (max A s.t. E < budget) |
+
+<b>Example Helios Scenarios:</b>
+
+- <b>Single-leaf biophysics calibration</b> (1-5 params, smooth, AD-differentiable): Use L-BFGS. Converges in ~20 evaluations.
+- <b>Leaf angle optimization with ray tracing</b> (2 params per leaf, noisy FD gradients): Use Adam for the noisy case, or L-BFGS if ray count is high enough for clean gradients.
+- <b>Canopy-level optimization</b> (50+ params, multimodal from shading): Use CMA-ES or GA for global search, then L-BFGS or BOBYQA for local refinement.
+- <b>Water-use efficiency optimization</b> (maximize A subject to E < budget): Use SLSQP with the \ref PO_ConstrainedSim API.
+- <b>Canopy structure calibration</b> (LAI, leaf angle distribution — integer leaf count, categorical species): Use GA (only algorithm supporting discrete params).
+
+\section PO_Algorithms Optimization Algorithms
+
+\subsection PO_GA Genetic Algorithm (GA)
+
+The Genetic Algorithm is a robust evolutionary optimization method. It is the only algorithm that supports INTEGER and CATEGORICAL parameter types.
+
+<b>When to use GA:</b>
+- When parameters are discrete (INTEGER or CATEGORICAL) or mixed continuous/discrete
+- When the objective landscape is highly multimodal (many local optima)
+- When you need a robust method that makes few assumptions about the problem
+- When computational budget is moderate (hundreds to thousands of evaluations)
+
+\subsection PO_BO Bayesian Optimization (BO)
+
+Bayesian Optimization builds a Gaussian Process surrogate model and uses it to intelligently select the next evaluation point. It is the most sample-efficient algorithm for low-dimensional problems.
+
+<b>When to use BO:</b>
+- When each simulation evaluation is very expensive (minutes to hours)
+- When you have a limited evaluation budget (tens to hundreds of evaluations)
+- When the number of parameters is small (d < 15-20)
+
+\note BO degrades in high dimensions because the GP surrogate becomes uninformative. Above ~20 parameters, prefer CMA-ES.
+
+\subsection PO_CMAES CMA-ES (Covariance Matrix Adaptation Evolution Strategy)
+
+CMA-ES adapts a full covariance matrix to learn the shape of the objective landscape. It is the best derivative-free method for correlated, non-separable problems.
+
+<b>When to use CMA-ES:</b>
+- When parameters are correlated or the problem is non-separable (e.g., mutual leaf shading)
+- When problem dimensionality is moderate (5-50 parameters)
+- When you need a hands-off method (almost no hyperparameter tuning required)
+
+\note The default max_evaluations=200 is too small for problems with more than ~8 parameters. For 50 parameters, use at least max_evaluations=2000.
+
+\subsection PO_LBFGS L-BFGS (Local Gradient-Based)
+
+L-BFGS is a quasi-Newton method that approximates the inverse Hessian using a limited number of stored correction pairs. It achieves superlinear convergence on smooth problems — orders of magnitude faster than derivative-free methods.
+
+<b>When to use L-BFGS:</b>
+- When you have accurate, smooth gradients (e.g., analytical derivatives of biophysics kernels)
+- When the problem is unimodal or you are already near the right basin
+- When you want the fastest possible convergence
+
+<b>When NOT to use L-BFGS:</b>
+- When gradients are noisy (FD on stochastic ray tracing) — use Adam instead
+- When the landscape is multimodal — use CMA-ES or GA first, then refine with L-BFGS
+
+\note L-BFGS uses NLopt (bundled with the plugin, built automatically).
+
+\subsection PO_Adam Adam (Noise-Tolerant Gradient-Based)
+
+Adam (Adaptive Moment Estimation) uses exponential moving averages of the gradient and squared gradient to smooth noise and adapt the learning rate per parameter. It implements the AdamW variant with optional decoupled weight decay.
+
+<b>When to use Adam:</b>
+- When gradients are available but noisy (e.g., finite differences on stochastic ray tracing output)
+- When L-BFGS fails with roundoff errors due to gradient noise
+- When NLopt is not available (Adam has no external dependencies)
+
+<b>When NOT to use Adam:</b>
+- When gradients are clean — L-BFGS converges much faster (superlinear vs linear)
+- When you need guaranteed convergence to exact minimum — Adam converges to a neighborhood
+
+\note Adam's learning_rate is problem-dependent and the most critical hyperparameter. Start with 0.01-0.05 for leaf angle problems, 0.001-0.01 for biophysical parameters.
+
+\subsection PO_BOBYQA BOBYQA (Derivative-Free Local)
+
+BOBYQA (Bound Optimization BY Quadratic Approximation) builds a local quadratic model from function values only — no gradients needed. It converges much faster than global methods when starting near the right basin.
+
+<b>When to use BOBYQA:</b>
+- When you need to polish a GA or CMA-ES result but gradients are unavailable
+- When the objective is a black box or too noisy for finite-difference gradients
+- When problem dimensionality is low to moderate (d < 30)
+
+\note BOBYQA uses NLopt (bundled). It only supports FLOAT parameters.
+
+\subsection PO_SLSQP SLSQP (Constrained Gradient-Based)
+
+SLSQP (Sequential Least Squares Programming) is the only algorithm that supports nonlinear inequality constraints with gradient information. It solves a QP subproblem at each step.
+
+<b>When to use SLSQP:</b>
+- When you need to optimize subject to physical constraints: "maximize photosynthesis A subject to transpiration E < budget"
+- When both objective and constraint gradients are available (analytical or finite-difference)
+- When you are currently using Lagrange multiplier scalarization (A - lambda*E) but want to state constraints directly
+
+\note SLSQP uses NLopt (bundled). It only supports FLOAT parameters.
+
+\section PO_AlgorithmSettings Algorithm Settings
+
+Each optimization algorithm has its own settings struct. To select an algorithm, construct the struct, set any desired fields, and pass it to \ref ParameterOptimization::setAlgorithm(). If \ref ParameterOptimization::setAlgorithm() is never called, a default algorithm is chosen automatically (see \ref PO_Defaults).
+
+\subsection PO_Settings_GA GeneticAlgorithm
+
+| Parameter | Description | Default Value |
+| --------- | ----------- | ------------- |
+| generations | Number of generations to run | 100 |
+| population_size | Number of individuals in the population | 20 |
+| crossover_rate | Probability of crossover (blending) between parent parameters | 0.5 |
+| elitism_rate | Fraction of best individuals preserved unchanged to next generation | 0.05 |
+| crossover | Crossover operator selection (see \ref PO_Crossover) | BLXAlphaCrossover{} |
+| mutation | Mutation operator selection (see \ref PO_Mutation) | PerGeneMutation{} |
+
+\subsection PO_Settings_BO BayesianOptimization
+
+| Parameter | Description | Default Value |
+| --------- | ----------- | ------------- |
+| max_evaluations | Total number of function evaluations | 100 |
+| initial_samples | Number of initial random samples before GP-guided search. 0 = auto: max(2d, 10) | 0 (auto) |
+| ucb_kappa | Exploration parameter for UCB acquisition function. Higher values favor exploration | 2.0 |
+| max_gp_samples | Maximum samples retained in GP model (for memory efficiency) | 200 |
+| acquisition_samples | Number of random candidates evaluated when optimizing acquisition function | 1000 |
+
+\subsection PO_Settings_CMAES CMAES
+
+| Parameter | Description | Default Value |
+| --------- | ----------- | ------------- |
+| max_evaluations | Total number of function evaluations | 200 |
+| lambda | Population size. 0 = auto: 4 + floor(3*ln(d)) | 0 (auto) |
+| sigma | Initial step-size controlling search radius | 0.3 |
+
+\subsection PO_Settings_LBFGS LBFGS
+
+| Parameter | Description | Default Value |
+| --------- | ----------- | ------------- |
+| max_iterations | Maximum number of optimizer iterations | 200 |
+| ftol_rel | Relative tolerance on function value | 1e-6 |
+| xtol_rel | Relative tolerance on parameter values | 1e-6 |
+| verify_gradients | Compare user gradients vs FD during optimization (for debugging) | false |
+| fd_step | FD step size for gradient verification | 1e-5 |
+
+\subsection PO_Settings_Adam Adam
+
+| Parameter | Description | Default Value |
+| --------- | ----------- | ------------- |
+| max_iterations | Maximum number of iterations | 200 |
+| learning_rate | Step size (alpha). Problem-dependent. | 0.01 |
+| beta1 | Exponential decay rate for first moment (momentum) | 0.9 |
+| beta2 | Exponential decay rate for second moment | 0.999 |
+| epsilon | Numerical stability constant | 1e-8 |
+| weight_decay | Decoupled weight decay (AdamW). 0 = standard Adam | 0.0 |
+| ftol_rel | Relative tolerance on function value for convergence | 1e-6 |
+| xtol_rel | Relative tolerance on parameter values for convergence | 1e-6 |
+
+\subsection PO_Settings_BOBYQA BOBYQA
+
+| Parameter | Description | Default Value |
+| --------- | ----------- | ------------- |
+| max_iterations | Maximum number of function evaluations | 200 |
+| ftol_rel | Relative tolerance on function value | 1e-6 |
+| xtol_rel | Relative tolerance on parameter values | 1e-6 |
+| initial_step | Initial trust region radius. 0 = auto (~10% of range) | 0.0 |
+
+\subsection PO_Settings_SLSQP SLSQP
+
+| Parameter | Description | Default Value |
+| --------- | ----------- | ------------- |
+| max_iterations | Maximum number of optimizer iterations | 200 |
+| ftol_rel | Relative tolerance on function value | 1e-6 |
+| xtol_rel | Relative tolerance on parameter values | 1e-6 |
+
+\subsection PO_Settings_IO I/O Settings
+
+I/O configuration is set directly on the \ref ParameterOptimization object, not on the algorithm struct.
+
+| Parameter | Description | Default Value |
+| --------- | ----------- | ------------- |
+| print_progress | Enable/disable progress output to console during optimization | false |
+| write_progress_to_file | Filename to write iteration-by-iteration progress (CSV format). Empty string disables | "" |
+| write_result_to_file | Filename to write final optimized parameters. Empty string disables | "" |
+| read_input_from_file | Filename to read initial parameter guess from (for warm-starting). Empty string starts from random | "" |
+
+\section PO_GradientAPI Gradient-Based Optimization
+
+Gradient-based algorithms (L-BFGS, Adam, SLSQP) require a gradient function. The simplest approach is to use \ref makeFDGradient, which automatically computes centered finite differences for all parameters:
+
+\code{.cpp}
+ObjectiveFunction objective = [](const ParametersToOptimize& p) -> float {
+    float x = p.at("x").value, y = p.at("y").value;
+    return x*x + y*y;
+};
+
+auto gradient = makeFDGradient(objective);
+
+ParameterOptimization opt;
+auto result = opt.run(objective, params, gradient);
+\endcode
+
+When analytical derivatives are available, you can provide them directly for faster and more accurate convergence:
+
+\code{.cpp}
+ObjectiveFunction objective = [](const ParametersToOptimize& p) -> float {
+    float x = p.at("x").value, y = p.at("y").value;
+    return x*x + y*y;
+};
+
+GradientFunction gradient = [](const ParametersToOptimize& p) -> ParameterGradient {
+    return {{"x", 2.f * p.at("x").value}, {"y", 2.f * p.at("y").value}};
+};
+
+ParameterOptimization opt;
+opt.setAlgorithm(LBFGS{});
+auto result = opt.run(objective, params, gradient);
+\endcode
+
+\subsection PO_GradientComposition Composing Gradients from Multiple Sources
+
+In Helios, different parts of the simulation may use different gradient strategies. For example, some parameters may have known analytical derivatives while others require finite differences. The gradient composition API lets you assemble a complete gradient from multiple sources:
+
+\code{.cpp}
+// Analytical gradient for biophysics parameters
+auto bio_source = GradientSource{
+    "biophysics_analytical", {"Vcmax", "Jmax"},
+    [&](const ParametersToOptimize& p, ParameterGradient& g) {
+        g["Vcmax"] = compute_dA_dVcmax(p);
+        g["Jmax"]  = compute_dA_dJmax(p);
+    }
+};
+
+// Finite-difference gradient for radiation parameters
+auto rad_source = makeFDGradientSource(
+    "radiation_fd", {"leaf_angle", "azimuth"}, objective, 1e-4f);
+
+// Compose into a single gradient function
+auto gradient = makeGradientFunction({bio_source, rad_source});
+
+ParameterOptimization opt;
+opt.setAlgorithm(LBFGS{});
+auto result = opt.run(objective, params, gradient);
+\endcode
+
+The optimizer sees one complete gradient. Each source writes its entries independently. This lets you use Enzyme AD where possible and finite differences where necessary, composed via chain rule.
+
+\subsection PO_FDHelper Finite-Difference Gradient Helper
+
+For parameters where analytical gradients are unavailable, use \ref makeFDGradientSource to create a gradient source that computes centered finite differences:
+
+\code{.cpp}
+auto fd_source = makeFDGradientSource(
+    "all_params_fd",       // human-readable label
+    {"x", "y", "z"},      // parameters to differentiate
+    objective,             // the objective function to perturb
+    1e-5f                  // relative perturbation factor (default)
+);
+auto gradient = makeGradientFunction({fd_source});
+\endcode
+
+\section PO_ConstraintAPI Constrained Optimization (SLSQP)
+
+SLSQP supports nonlinear inequality constraints of the form \f$c_i(x) \leq 0\f$. There are two ways to use constrained optimization:
+
+\subsection PO_SeparateCallbacks Separate Callbacks
+
+Provide the objective, gradient, and constraints as separate functions:
+
+\code{.cpp}
+// Minimize x^2 + y^2 subject to x + y >= 1
+ObjectiveFunction obj = [](const ParametersToOptimize& p) {
+    float x = p.at("x").value, y = p.at("y").value;
+    return x*x + y*y;
+};
+GradientFunction grad = [](const ParametersToOptimize& p) -> ParameterGradient {
+    return {{"x", 2.f * p.at("x").value}, {"y", 2.f * p.at("y").value}};
+};
+
+// Constraint: x + y >= 1 → rewrite as 1 - x - y <= 0
+Constraint c;
+c.function = [](const ParametersToOptimize& p) -> float {
+    return 1.f - p.at("x").value - p.at("y").value;
+};
+c.gradient = [](const ParametersToOptimize& p) -> ParameterGradient {
+    return {{"x", -1.f}, {"y", -1.f}};
+};
+
+ParameterOptimization opt;
+opt.setAlgorithm(SLSQP{});
+auto result = opt.run(obj, params, grad, {c});
+\endcode
+
+\subsection PO_ConstrainedSim Combined Simulation
+
+When your simulation computes the objective, constraints, and all gradients in a single forward pass (typical for Helios biophysics), use the \ref ConstrainedSimulation API. The optimizer caches results internally so the simulation runs only once per parameter point, even though NLopt calls the objective and constraint callbacks separately.
+
+\code{.cpp}
+// Maximize photosynthesis A subject to transpiration E < E_budget
+ConstrainedSimulation sim = [&](const ParametersToOptimize& p) -> ConstrainedResult {
+    auto [A, E, dA, dE] = run_biophysics(p);  // one simulation, all outputs
+    return {
+        -A,                        // objective (minimize negative A = maximize A)
+        negate(dA),                // objective gradient
+        {E - E_budget},            // constraints: E - budget <= 0
+        {dE}                       // constraint gradients
     };
+};
 
-    //Set the algorithm settings
-    OptimizationSettings settings;
-    settings.population_size = 100;
-    settings.generations = 100;
-    settings.crossover_rate = 0.5;
-    settings.mutation_rate = 0.1;
-    settings.print_progress = true;
-    settings.write_progress_to_file = "progress.txt";
-    settings.write_result_to_file = "result.txt";
-
-    auto result = popt.run(sim,params,settings);
-
-    std::cout << "Expected (5,100,1000,7), got (" << result.parameters.at("Em_BMF").value << "," <<
-        result.parameters.at("i0_BMF").value << ")" << result.parameters.at("k_BMF").value << "," <<
-        result.parameters.at("b").value << ")" << std::endl;
-
-}
+ParameterOptimization opt;
+opt.setAlgorithm(SLSQP{});
+auto result = opt.run(sim, params);
 \endcode
 
-A previously written resulting parameter set can be read and imported into the population before subsequent running of the algorithm.
+This is the recommended approach for Helios problems like Cowan-Farquhar optimization, where computing A and E together is much cheaper than computing them separately.
+
+\section PO_Crossover Crossover Operators (GA)
+
+The GA supports multiple crossover operators, selected by assigning a crossover struct to the \ref GeneticAlgorithm::crossover field. Each struct carries its own parameters.
+
+\subsection PO_Crossover_BLXAlpha BLXAlphaCrossover (default)
+
+Standard component-wise BLX-alpha crossover (Eshelman & Shaffer, 1993). For each parameter, the child value is sampled uniformly from an extended range around the two parent values.
+
+| Parameter | Description | Default Value |
+| --------- | ----------- | ------------- |
+| alpha | Blend parameter controlling how far beyond parent values the child can be sampled | 0.5 |
+
+\subsection PO_Crossover_BLXPCA BLXPCACrossover
+
+BLX-alpha crossover performed in PCA-transformed space. The population is projected into principal component space before blending, which better handles non-separable problems where parameters are correlated.
+
+| Parameter | Description | Default Value |
+| --------- | ----------- | ------------- |
+| alpha | Blend parameter controlling extrapolation range | 0.5 |
+| pca_update_interval | Number of generations between PCA basis recomputation | 5 |
+
+\section PO_Mutation Mutation Operators (GA)
+
+The GA supports multiple mutation operators, selected by assigning a mutation struct to the \ref GeneticAlgorithm::mutation field.
+
+\subsection PO_Mutation_PerGene PerGeneMutation (default)
+
+Standard per-gene Gaussian mutation. Each parameter is independently mutated with a given probability.
+
+| Parameter | Description | Default Value |
+| --------- | ----------- | ------------- |
+| rate | Per-gene mutation probability | 0.1 |
+
+\subsection PO_Mutation_Isotropic IsotropicMutation
+
+Single-gate isotropic Gaussian mutation. A single coin flip determines whether the entire individual is mutated.
+
+| Parameter | Description | Default Value |
+| --------- | ----------- | ------------- |
+| rate | Mutation gate probability | 0.1 |
+
+\subsection PO_Mutation_Hybrid HybridMutation
+
+A multi-strategy hybrid mutation combining PCA-Gaussian, PCA-Cauchy (heavy tails for escaping local optima), and random direction sub-strategies.
+
+| Parameter | Description | Default Value |
+| --------- | ----------- | ------------- |
+| rate | Mutation gate probability | 0.15 |
+| pca_update_interval | Generations between PCA recomputation | 5 |
+| sigma_pca | PCA-Gaussian sigma in whitened space | 0.25 |
+| gamma_cauchy | PCA-Cauchy scale parameter | 0.1 |
+| sigma_random | Random direction step size as fraction of average parameter range | 0.3 |
+| pca_gaussian_prob | Probability of selecting PCA-Gaussian | 0.70 |
+| pca_cauchy_prob | Probability of selecting PCA-Cauchy | 0.20 |
+
+\section PO_Presets Presets
+
+The stochastic, population-based algorithms provide static \c explore() and \c exploit() factory methods for common configurations. These presets control the exploration-exploitation tradeoff (population diversity, mutation rates, acquisition parameters, step sizes).
+
+Deterministic local optimizers (L-BFGS, Adam, BOBYQA, SLSQP) do not have presets because they follow a single deterministic trajectory from the starting point — there is no exploration-exploitation tradeoff. Configure them directly by setting the struct fields.
+
+| Algorithm | explore() | exploit() |
+|-----------|-----------|-----------|
+| GA | Large pop, high mutation, BLXPCA+Hybrid | Smaller pop, low mutation, BLXPCA+PerGene |
+| BO | High kappa (exploration), many samples | Low kappa (exploitation) |
+| CMA-ES | Large sigma (0.5), more evaluations | Small sigma (0.1), fewer evaluations |
 
 \code{.cpp}
- ...
-    settings.read_input_from_file = "result.txt";
-    auto result = popt.run(sim,params,settings);
- ...
+ParameterOptimization opt;
+opt.setAlgorithm(CMAES::explore());
+auto result = opt.run(simulation, params);
 \endcode
+
+\section PO_Defaults Default Algorithm Selection
+
+The default algorithm selection table is shown in the \ref PO_QuickStart "Quick Start" section above. When discrete parameters are passed with a gradient function, the gradient is ignored and GA is used — it is the only algorithm that supports INTEGER and CATEGORICAL types. The constrained + discrete case is not directly supported; see \ref PO_PenaltyConstraints for a workaround.
+
+\section PO_PenaltyConstraints Penalty-Based Constraint Handling (Discrete + Constrained)
+
+No algorithm in the plugin supports both discrete (INTEGER/CATEGORICAL) parameters **and** nonlinear constraints simultaneously. SLSQP handles constraints but requires continuous (FLOAT) parameters. GA handles discrete parameters but has no built-in constraint mechanism.
+
+The recommended workaround is to fold the constraints into the objective function as **penalty terms**. Instead of stating the constraint \f$c(x) \leq 0\f$ directly, add a large penalty when the constraint is violated:
+
+\f[
+f_{\text{penalized}}(x) = f(x) + \lambda \cdot \max(0,\; c(x))^2
+\f]
+
+where \f$\lambda\f$ is a penalty weight large enough to make constraint violations undesirable relative to objective improvements.
+
+\code{.cpp}
+// Example: minimize f(x,y) = x^2 + y^2  subject to  x + y >= 1
+// where x is an INTEGER parameter
+
+ParametersToOptimize params = {
+    {"x", {0.f, -5.f, 5.f, ParameterType::INTEGER}},
+    {"y", {0.f, -5.f, 5.f}}
+};
+
+float lambda = 100.f;  // penalty weight — tune to problem scale
+
+auto penalized_objective = [&](const ParametersToOptimize& p) -> float {
+    float x = p.at("x").value, y = p.at("y").value;
+    float f = x * x + y * y;                          // true objective
+    float c = 1.f - x - y;                            // constraint: x + y >= 1  →  1 - x - y <= 0
+    float penalty = (c > 0.f) ? lambda * c * c : 0.f; // quadratic penalty
+    return f + penalty;
+};
+
+ParameterOptimization opt;
+opt.setAlgorithm(GeneticAlgorithm{});  // supports INTEGER params
+auto result = opt.run(penalized_objective, params);
+\endcode
+
+<b>Tips for penalty-based constraints:</b>
+- Start with \f$\lambda = 10\f$–\f$100\f$ and increase if the optimizer finds solutions that violate the constraint.
+- Quadratic penalty (\f$c^2\f$) provides a smooth gradient near the boundary, which helps even derivative-free methods.
+- For multiple constraints, sum the penalties: \f$f(x) + \lambda_1 \max(0, c_1)^2 + \lambda_2 \max(0, c_2)^2\f$.
+- Verify feasibility of the final solution — the penalty approach does not guarantee exact constraint satisfaction.
+
+\section PO_ParamTypes Parameter Types
+
+| Type | Supported By | Description |
+|------|-------------|-------------|
+| FLOAT (default) | All algorithms | Continuous float parameter |
+| INTEGER | GA only | Rounded to nearest integer at every stage |
+| CATEGORICAL | GA only | Restricted to a fixed set of allowed values |
+
+\note L-BFGS, Adam, BOBYQA, and SLSQP require all parameters to be FLOAT. Passing INTEGER or CATEGORICAL parameters to these algorithms will throw a runtime error.
+
+\section PO_TwoStage Two-Stage Optimization (Global + Local Refinement)
+
+For multimodal problems, a common strategy is to use a global method to find the right basin, then a gradient-based method to converge precisely:
+
+\code{.cpp}
+// Phase 1: Global search with CMA-ES
+ParameterOptimization explorer;
+explorer.setAlgorithm(CMAES::explore());
+auto coarse = explorer.run(simulation, params);
+
+// Phase 2: Local refinement with L-BFGS from CMA-ES's best point
+ParameterOptimization refiner;
+refiner.setAlgorithm(LBFGS{});  // default settings are fine for refinement
+auto result = refiner.run(objective, coarse.parameters, gradient);
+\endcode
+
+Or for noisy objectives where gradients are unreliable:
+
+\code{.cpp}
+// Phase 1: Adam with noisy gradients (tolerates ray tracing noise)
+ParameterOptimization phase1;
+Adam adam; adam.max_iterations = 200; adam.learning_rate = 0.02f;
+phase1.setAlgorithm(adam);
+auto coarse = phase1.run(objective, params, noisy_gradient);
+
+// Phase 2: BOBYQA polish without gradients (avoids noise entirely)
+ParameterOptimization phase2;
+phase2.setAlgorithm(BOBYQA{});  // default settings are fine for polishing
+auto result = phase2.run(objective, coarse.parameters);
+\endcode
+
+\section PO_NLopt NLopt Dependency
+
+L-BFGS, BOBYQA, and SLSQP use the NLopt optimization library (LGPL, v2.10.1). NLopt is **bundled** with the plugin in `plugins/parameteroptimization/lib/nlopt-2.10.1/` and built automatically from source — no user installation is required.
+
+If a system-installed NLopt is detected, it will be used instead of the bundled version. This is transparent and requires no configuration.
+
+If NLopt is unavailable for any reason:
+- GA, Bayesian Optimization, CMA-ES, and Adam remain fully functional (no NLopt dependency)
+- L-BFGS, BOBYQA, and SLSQP will return error results at runtime with a descriptive message
+- The compile-time flag `HELIOS_HAVE_NLOPT` indicates NLopt availability
+
+\section PO_FloatPrecision Note on Float vs Double Precision
+
+The ParameterOptimization plugin uses `float` for parameters and objective values. NLopt-based algorithms (L-BFGS, BOBYQA, SLSQP) internally operate in `double`. Parameters are converted at the boundary. This means:
+- Convergence precision is limited to ~7 significant digits (float precision)
+- For very tight tolerances (ftol_rel < 1e-6), the float-to-double conversion may limit convergence
+- For very tight tolerances, consider whether float precision is sufficient for your application
 
 */

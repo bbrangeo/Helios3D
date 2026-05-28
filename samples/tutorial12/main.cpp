@@ -80,7 +80,8 @@ int main() {
     std::vector<std::string> bandlabels = {"red", "green", "blue"};
 
     // Set diffuse sky spectrum for all bands
-    radiation.setDiffuseSpectrum(bandlabels, "solar_spectrum_ASTMG173");
+    radiation.setDiffuseSpectrum("solar_spectrum_ASTMG173");
+    radiation.setDiffuseSpectrumIntegral(100.f);
 
     // STEP 5: Configure the radiation camera for synthetic image generation
     std::string cameralabel = "bunnycam";
@@ -89,22 +90,8 @@ int main() {
     vec3 camera_position = make_vec3(-0.01, 0.05, 0.6f); // Positioned back and slightly elevated
     vec3 camera_lookat = make_vec3(0, 0.05, 0); // Looking at the center of the scene
 
-    // Configure camera properties for high-quality imaging
-    CameraProperties cameraproperties;
-    cameraproperties.camera_resolution = make_int2(1024, 1024); // Square 1024x1024 resolution
-    cameraproperties.focal_plane_distance = 0.5; // Focus distance
-    cameraproperties.lens_diameter = 0.002f; // Small aperture for sharp focus
-    cameraproperties.FOV_aspect_ratio = 1; // Square aspect ratio
-    cameraproperties.HFOV = 50.f; // 50-degree horizontal field of view
-
     // Add the camera to the radiation model with 100 rays per pixel for quality
-    radiation.addRadiationCamera(cameralabel, bandlabels, camera_position, camera_lookat, cameraproperties, 100);
-
-    // Load camera spectral response data and simulate iPhone 12 Pro Max camera
-    context.loadXML("plugins/radiation/spectral_data/camera_spectral_library.xml", true);
-    radiation.setCameraSpectralResponse(cameralabel, "red", "iPhone12ProMAX_red");
-    radiation.setCameraSpectralResponse(cameralabel, "green", "iPhone12ProMAX_green");
-    radiation.setCameraSpectralResponse(cameralabel, "blue", "iPhone12ProMAX_blue");
+    radiation.addRadiationCameraFromLibrary(cameralabel, "iPhone12ProMAX", camera_position, camera_lookat, 100);
 
     // STEP 6: Run the radiation simulation and generate outputs
 
@@ -115,7 +102,7 @@ int main() {
     radiation.runBand(bandlabels);
 
     // Apply standard image processing pipeline (tone mapping, gamma correction, etc.)
-    radiation.applyImageProcessingPipeline("bunnycam", "red", "green", "blue", 1, 1, 1, 1);
+    radiation.applyCameraImageCorrections(cameralabel, "red", "green", "blue", 1.2, 1, 1);
 
     // STEP 7: Export results for computer vision applications
 
@@ -138,6 +125,9 @@ int main() {
 
     // Auto-calibrate camera image using colorboard reference values with quality report
     std::string corrected_image = radiation.autoCalibrateCameraImage("bunnycam", "red", "green", "blue", "../output/auto_calibrated_bunnycam.jpeg", true);
+
+    // Display auto-calibrated image
+    vis.displayImage(corrected_image);
 
     // Note: Use the Python script 'visualize_segmentation.py' to view segmentation masks
 

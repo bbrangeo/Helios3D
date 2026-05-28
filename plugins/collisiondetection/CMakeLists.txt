@@ -11,6 +11,16 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Mo
 # Try to find CUDA toolkit
 find_package(CUDAToolkit QUIET)
 
+# Verify that the CUDA language can actually be enabled (e.g., VS integration is installed)
+if(CUDAToolkit_FOUND)
+    include(CheckLanguage)
+    check_language(CUDA)
+    if(NOT CMAKE_CUDA_COMPILER)
+        message(STATUS "CUDA toolkit found but CUDA language could not be enabled (missing Visual Studio integration?) - falling back to CPU-only build")
+        set(CUDAToolkit_FOUND FALSE)
+    endif()
+endif()
+
 if(CUDAToolkit_FOUND)
     message(STATUS "CUDA found - building with GPU acceleration")
     set(CMAKE_CUDA_COMPILER ${CUDAToolkit_NVCC_EXECUTABLE})
@@ -64,7 +74,7 @@ if(CUDAToolkit_FOUND)
     endif()
     
     # Build with CUDA support
-    add_library(collisiondetection STATIC "src/CollisionDetection.cu" "src/CollisionDetection.cpp" "src/CollisionDetection_RayTracing.cpp" "tests/selfTest.cpp")
+    add_library(collisiondetection STATIC "src/CollisionDetection.cu" "src/CollisionDetection.cpp" "src/CollisionDetection_RayTracing.cpp" "src/CollisionDetection_Slicing.cpp" "tests/selfTest.cpp")
     
     # Set CUDA properties for the target
     set_target_properties(collisiondetection PROPERTIES CUDA_RUNTIME_LIBRARY Static CUDA_RESOLVE_DEVICE_SYMBOLS ON)
@@ -82,15 +92,15 @@ if(CUDAToolkit_FOUND)
     target_include_directories(collisiondetection PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
     
     target_link_libraries(collisiondetection PUBLIC CUDA::cudart_static)
-    
+
     # Define preprocessor macro to indicate CUDA support
     target_compile_definitions(collisiondetection PRIVATE HELIOS_CUDA_AVAILABLE)
-    
+
 else()
     message(STATUS "CUDA not found - building CPU-only version")
     
     # Build CPU-only version (exclude .cu file)
-    add_library(collisiondetection STATIC "src/CollisionDetection.cpp" "src/CollisionDetection_RayTracing.cpp" "tests/selfTest.cpp")
+    add_library(collisiondetection STATIC "src/CollisionDetection.cpp" "src/CollisionDetection_RayTracing.cpp" "src/CollisionDetection_Slicing.cpp" "tests/selfTest.cpp")
     
     target_include_directories(collisiondetection PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
     

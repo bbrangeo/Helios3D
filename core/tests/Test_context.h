@@ -64,10 +64,12 @@ TEST_CASE("Core Context State and Configuration") {
 
     SUBCASE("Texture utility methods") {
         Context ctx;
-        capture_cerr cerr_buffer;
-        DOCTEST_CHECK_NOTHROW(ctx.addPatch(make_vec3(0, 0, 0), make_vec2(1, 1), nullrotation, "lib/images/solid.jpg"));
-        DOCTEST_CHECK_THROWS(ctx.addPatch(make_vec3(0, 0, 0), make_vec2(1, 1), nullrotation, "lib/images/missing.png"));
-        DOCTEST_CHECK_THROWS(ctx.addPatch(make_vec3(0, 0, 0), make_vec2(1, 1), nullrotation, "lib/images/invalid.txt"));
+        {
+            capture_cerr cerr_buffer;
+            DOCTEST_CHECK_NOTHROW(ctx.addPatch(make_vec3(0, 0, 0), make_vec2(1, 1), nullrotation, "lib/images/solid.jpg"));
+            DOCTEST_CHECK_THROWS(ctx.addPatch(make_vec3(0, 0, 0), make_vec2(1, 1), nullrotation, "lib/images/missing.png"));
+            DOCTEST_CHECK_THROWS(ctx.addPatch(make_vec3(0, 0, 0), make_vec2(1, 1), nullrotation, "lib/images/invalid.txt"));
+        }
 
         Texture tex("lib/images/solid.jpg");
         DOCTEST_CHECK(tex.getTextureFile() == "lib/images/solid.jpg");
@@ -523,6 +525,116 @@ TEST_CASE("Primitive Management: Creation, Properties, and Operations") {
     }
 }
 
+TEST_CASE("Triangle Scaling") {
+    Context ctx;
+    const float errtol = 0.0001f;
+
+    SUBCASE("scalePrimitive basic test") {
+        // Create a simple right triangle at the origin
+        vec3 v0 = make_vec3(0, 0, 0);
+        vec3 v1 = make_vec3(1, 0, 0);
+        vec3 v2 = make_vec3(0, 1, 0);
+        uint tri = ctx.addTriangle(v0, v1, v2);
+
+        // Get initial vertices and area
+        std::vector<vec3> verts_before = ctx.getPrimitiveVertices(tri);
+        float area_before = ctx.getPrimitiveArea(tri);
+
+        // Apply uniform 2x scaling
+        ctx.scalePrimitive(tri, make_vec3(2, 2, 2));
+
+        // Get vertices and area after scaling
+        std::vector<vec3> verts_after = ctx.getPrimitiveVertices(tri);
+        float area_after = ctx.getPrimitiveArea(tri);
+
+        // Expected: vertices should be doubled (scaling about origin)
+        // v0: (0,0,0) -> (0,0,0)  [origin stays at origin]
+        // v1: (1,0,0) -> (2,0,0)
+        // v2: (0,1,0) -> (0,2,0)
+        // Area should be 4x larger (scale^2 for 2D)
+
+        DOCTEST_CHECK(verts_after[0].x == doctest::Approx(0.0f).epsilon(errtol));
+        DOCTEST_CHECK(verts_after[0].y == doctest::Approx(0.0f).epsilon(errtol));
+        DOCTEST_CHECK(verts_after[1].x == doctest::Approx(2.0f).epsilon(errtol));
+        DOCTEST_CHECK(verts_after[1].y == doctest::Approx(0.0f).epsilon(errtol));
+        DOCTEST_CHECK(verts_after[2].x == doctest::Approx(0.0f).epsilon(errtol));
+        DOCTEST_CHECK(verts_after[2].y == doctest::Approx(2.0f).epsilon(errtol));
+
+        DOCTEST_CHECK(area_after == doctest::Approx(4.0f * area_before).epsilon(errtol));
+    }
+
+    SUBCASE("scalePrimitiveAboutPoint test") {
+        // Create a simple right triangle at the origin
+        vec3 v0 = make_vec3(0, 0, 0);
+        vec3 v1 = make_vec3(1, 0, 0);
+        vec3 v2 = make_vec3(0, 1, 0);
+        uint tri = ctx.addTriangle(v0, v1, v2);
+
+        // Get initial area
+        float area_before = ctx.getPrimitiveArea(tri);
+
+        // Apply 2x scaling about origin
+        ctx.scalePrimitiveAboutPoint(tri, make_vec3(2, 2, 2), make_vec3(0, 0, 0));
+
+        // Get area after scaling
+        float area_after = ctx.getPrimitiveArea(tri);
+
+        // Expected: should behave same as scalePrimitive when scaling about origin
+        DOCTEST_CHECK(area_after == doctest::Approx(4.0f * area_before).epsilon(errtol));
+    }
+
+    SUBCASE("scalePrimitiveAboutPoint - scale about centroid") {
+        // Create a triangle NOT at the origin
+        vec3 v0 = make_vec3(1, 1, 0);
+        vec3 v1 = make_vec3(2, 1, 0);
+        vec3 v2 = make_vec3(1, 2, 0);
+        uint tri = ctx.addTriangle(v0, v1, v2);
+
+        // Calculate centroid
+        std::vector<vec3> verts_before = ctx.getPrimitiveVertices(tri);
+        vec3 center = make_vec3(0, 0, 0);
+        for (const auto &v: verts_before) {
+            center = center + v;
+        }
+        center = center / float(verts_before.size());
+
+        float area_before = ctx.getPrimitiveArea(tri);
+
+        // Scale by 0.5 about the centroid (like user's code)
+        ctx.scalePrimitiveAboutPoint(tri, make_vec3(0.5f, 0.5f, 0.5f), center);
+
+        // Get area after scaling
+        float area_after = ctx.getPrimitiveArea(tri);
+
+        // Expected: area should be 0.25x (scale^2)
+        DOCTEST_CHECK(area_after == doctest::Approx(0.25f * area_before).epsilon(errtol));
+    }
+
+    SUBCASE("triangle in compound object") {
+        // Create a compound object with a triangle
+        std::vector<uint> UUIDs;
+        UUIDs.push_back(ctx.addTriangle(make_vec3(0, 0, 0), make_vec3(1, 0, 0), make_vec3(0, 1, 0)));
+        uint objID = ctx.addPolymeshObject(UUIDs);
+
+        uint tri = UUIDs[0];
+        float area_before = ctx.getPrimitiveArea(tri);
+
+        // Try to scale the triangle (should be blocked)
+        bool has_warning;
+        {
+            capture_cerr cerr_buffer;
+            ctx.scalePrimitiveAboutPoint(tri, make_vec3(2, 2, 2), make_vec3(0, 0, 0));
+            has_warning = cerr_buffer.has_output();
+        } // cerr_buffer destroyed here
+        DOCTEST_CHECK(has_warning); // Should print warning
+
+        float area_after = ctx.getPrimitiveArea(tri);
+
+        // Area should NOT change (scaling blocked for compound objects)
+        DOCTEST_CHECK(area_after == doctest::Approx(area_before).epsilon(errtol));
+    }
+}
+
 TEST_CASE("Object Management") {
     SUBCASE("addBoxObject") {
         Context context_test;
@@ -533,7 +645,7 @@ TEST_CASE("Object Management") {
 
         uint objID;
         DOCTEST_CHECK_NOTHROW(objID = context_test.addBoxObject(center, size, subdiv));
-        std::vector<uint> UUIDs = context_test.getObjectPointer(objID)->getPrimitiveUUIDs();
+        std::vector<uint> UUIDs = context_test.getObjectPrimitiveUUIDs(objID);
 
         DOCTEST_CHECK(UUIDs.size() == 6);
         vec3 normal_r = context_test.getPrimitiveNormal(UUIDs.at(0));
@@ -561,7 +673,7 @@ TEST_CASE("Object Management") {
         SphericalCoord rotation = make_SphericalCoord(0.25f * PI_F, 1.4f * PI_F);
         uint objID = context_test.addTileObject(center, size, rotation, subdiv);
 
-        std::vector<uint> UUIDs = context_test.getObjectPointer(objID)->getPrimitiveUUIDs();
+        std::vector<uint> UUIDs = context_test.getObjectPrimitiveUUIDs(objID);
         for (uint UUIDp: UUIDs) {
             vec3 n = context_test.getPrimitiveNormal(UUIDp);
             SphericalCoord rot = cart2sphere(n);
@@ -578,7 +690,7 @@ TEST_CASE("Object Management") {
         SphericalCoord rotation = make_SphericalCoord(0.1f * PI_F, 2.4f * PI_F);
 
         uint objID = context_test.addTileObject(center, size, rotation, subdiv, "lib/images/disk_texture.png");
-        std::vector<uint> UUIDs = context_test.getObjectPointer(objID)->getPrimitiveUUIDs();
+        std::vector<uint> UUIDs = context_test.getObjectPrimitiveUUIDs(objID);
         float area_sum = 0.f;
         for (uint UUID: UUIDs) {
             area_sum += context_test.getPrimitiveArea(UUID);
@@ -592,22 +704,22 @@ TEST_CASE("Object Management") {
         vec3 node0 = make_vec3(0, 0, 0);
         vec3 node1 = make_vec3(0, 0, len);
         uint cone = context_test.addConeObject(50, node0, node1, r0, r1);
-        context_test.getConeObjectPointer(cone)->translate(make_vec3(1, 1, 1));
-        std::vector<vec3> nodes = context_test.getConeObjectPointer(cone)->getNodeCoordinates();
+        context_test.translateObject(cone, make_vec3(1, 1, 1));
+        std::vector<vec3> nodes = context_test.getConeObjectNodes(cone);
         DOCTEST_CHECK(nodes.at(0) == make_vec3(1, 1, 1));
         DOCTEST_CHECK(nodes.at(1) == make_vec3(1, 1, 1 + len));
         vec3 axis = cross(make_vec3(0, 0, 1), make_vec3(1, 0, 0));
         float ang = acos_safe(make_vec3(1, 0, 0) * make_vec3(0, 0, 1));
-        context_test.getConeObjectPointer(cone)->translate(-nodes.at(0));
-        context_test.getConeObjectPointer(cone)->rotate(ang, axis);
-        context_test.getConeObjectPointer(cone)->translate(nodes.at(0));
-        nodes = context_test.getConeObjectPointer(cone)->getNodeCoordinates();
+        context_test.translateObject(cone, -nodes.at(0));
+        context_test.rotateObject(cone, ang, axis);
+        context_test.translateObject(cone, nodes.at(0));
+        nodes = context_test.getConeObjectNodes(cone);
         DOCTEST_CHECK(nodes.at(1).x == doctest::Approx(nodes.at(0).x + len).epsilon(errtol));
-        context_test.getConeObjectPointer(cone)->scaleLength(2.0);
-        nodes = context_test.getConeObjectPointer(cone)->getNodeCoordinates();
+        context_test.scaleConeObjectLength(cone, 2.0);
+        nodes = context_test.getConeObjectNodes(cone);
         DOCTEST_CHECK(nodes.at(1).x == doctest::Approx(nodes.at(0).x + 2 * len).epsilon(errtol));
-        context_test.getConeObjectPointer(cone)->scaleGirth(2.0);
-        std::vector<float> radii = context_test.getConeObjectPointer(cone)->getNodeRadii();
+        context_test.scaleConeObjectGirth(cone, 2.0);
+        std::vector<float> radii = context_test.getConeObjectNodeRadii(cone);
         DOCTEST_CHECK(radii.at(0) == doctest::Approx(2 * r0).epsilon(errtol));
         DOCTEST_CHECK(radii.at(1) == doctest::Approx(2 * r1).epsilon(errtol));
     }
@@ -648,12 +760,13 @@ TEST_CASE("Object Management") {
     }
 
     SUBCASE("copy object with texture override preserves color") {
+        capture_cerr cerr_buffer; // Capture deprecation warnings from setPrimitiveColor/overridePrimitiveTextureColor
         Context ctx;
 
         // Create a tile with texture
         std::vector<uint> UUIDs = ctx.addTile(nullorigin, make_vec2(1, 1), nullrotation, make_int2(2, 2), "lib/images/disk_texture.png");
 
-        // Set color and override texture
+        // Set color and override texture - these trigger deprecation warnings (once per execution)
         RGBcolor green_color = make_RGBcolor(0, 1, 0);
         ctx.setPrimitiveColor(UUIDs, green_color);
         ctx.overridePrimitiveTextureColor(UUIDs);
@@ -689,24 +802,33 @@ TEST_CASE("Object Management") {
     }
 
     SUBCASE("domain cropping") {
-        capture_cerr cerr_buffer;
         Context ctx;
         uint p1 = ctx.addPatch(make_vec3(-2.f, 0.f, 0.f), make_vec2(1, 1));
         uint p2 = ctx.addPatch(make_vec3(2.f, 0.f, 0.f), make_vec2(1, 1));
         uint p3 = ctx.addPatch(make_vec3(0.f, 3.f, 0.f), make_vec2(1, 1));
         uint p4 = ctx.addPatch(make_vec3(0.f, 0.f, 3.f), make_vec2(1, 1));
-        ctx.cropDomainX(make_vec2(-1.f, 1.f));
-        DOCTEST_CHECK(!ctx.doesPrimitiveExist(p1));
-        ctx.cropDomainY(make_vec2(-1.f, 1.f));
-        DOCTEST_CHECK(!ctx.doesPrimitiveExist(p3));
-        ctx.cropDomainZ(make_vec2(-1.f, 1.f));
-        DOCTEST_CHECK(!ctx.doesPrimitiveExist(p4));
-        DOCTEST_CHECK(cerr_buffer.has_output());
-        cerr_buffer.clear();
-        std::vector<uint> ids_rem = ctx.getAllUUIDs();
-        ctx.cropDomain(ids_rem, make_vec2(-0.5f, 1.f), make_vec2(-0.5f, 1.f), make_vec2(-0.5f, 1.f));
-        DOCTEST_CHECK(!ctx.doesPrimitiveExist(p2));
-        DOCTEST_CHECK(cerr_buffer.has_output());
+
+        bool has_output1, has_output2;
+        {
+            capture_cerr cerr_buffer;
+            ctx.cropDomainX(make_vec2(-1.f, 1.f));
+            DOCTEST_CHECK(!ctx.doesPrimitiveExist(p1));
+            ctx.cropDomainY(make_vec2(-1.f, 1.f));
+            DOCTEST_CHECK(!ctx.doesPrimitiveExist(p3));
+            ctx.cropDomainZ(make_vec2(-1.f, 1.f));
+            DOCTEST_CHECK(!ctx.doesPrimitiveExist(p4));
+            has_output1 = cerr_buffer.has_output();
+        }
+        DOCTEST_CHECK(has_output1);
+
+        {
+            capture_cerr cerr_buffer;
+            std::vector<uint> ids_rem = ctx.getAllUUIDs();
+            ctx.cropDomain(ids_rem, make_vec2(-0.5f, 1.f), make_vec2(-0.5f, 1.f), make_vec2(-0.5f, 1.f));
+            DOCTEST_CHECK(!ctx.doesPrimitiveExist(p2));
+            has_output2 = cerr_buffer.has_output();
+        }
+        DOCTEST_CHECK(has_output2);
     }
 }
 
@@ -758,6 +880,28 @@ TEST_CASE("Data Management") {
         DOCTEST_CHECK(d1_r.day == date.day);
         ctx.setCurrentTimeseriesPoint("ts", 1);
         DOCTEST_CHECK(ctx.queryTimeseriesData("ts") == doctest::Approx(305.3f));
+
+        // updateTimeseriesData: replace value at an existing (date, time)
+        ctx.updateTimeseriesData("ts", date, time0, 999.9f);
+        DOCTEST_CHECK(ctx.queryTimeseriesData("ts", 0) == doctest::Approx(999.9f));
+        DOCTEST_CHECK(ctx.queryTimeseriesData("ts", date, time0) == doctest::Approx(999.9f));
+        // The other point should be untouched
+        DOCTEST_CHECK(ctx.queryTimeseriesData("ts", 1) == doctest::Approx(305.3f));
+        // Length is unchanged (update, not insert)
+        DOCTEST_CHECK(ctx.getTimeseriesLength("ts") == 2);
+
+        // Error: unknown label
+        {
+            capture_cerr cerr_buffer;
+            DOCTEST_CHECK_THROWS(ctx.updateTimeseriesData("nonexistent", date, time0, 0.f));
+        }
+
+        // Error: known label but (date, time) does not match any existing point
+        {
+            Time time_missing = make_Time(time0.hour, 0, 0);
+            capture_cerr cerr_buffer;
+            DOCTEST_CHECK_THROWS(ctx.updateTimeseriesData("ts", date, time_missing, 0.f));
+        }
     }
 
     SUBCASE("Primitive data") {
@@ -831,14 +975,14 @@ TEST_CASE("Data and Object Management") {
     SUBCASE("Object creation and manipulation") {
         Context ctx;
         uint disk = ctx.addDiskObject(10, make_vec3(0, 0, 0), make_vec2(1, 1));
-        DOCTEST_CHECK(ctx.getDiskObjectPointer(disk)->getObjectType() == OBJECT_TYPE_DISK);
+        DOCTEST_CHECK(ctx.getObjectType(disk) == OBJECT_TYPE_DISK);
         DOCTEST_CHECK(ctx.getObjectArea(disk) > 0);
         DOCTEST_CHECK(ctx.getDiskObjectCenter(disk) == make_vec3(0, 0, 0));
         DOCTEST_CHECK(ctx.getDiskObjectSubdivisionCount(disk) == 10);
         DOCTEST_CHECK(ctx.getDiskObjectSize(disk).x == doctest::Approx(1.f));
 
         uint sphere = ctx.addSphereObject(10, make_vec3(1, 1, 1), 0.5f);
-        DOCTEST_CHECK(ctx.getSphereObjectPointer(sphere)->getObjectType() == OBJECT_TYPE_SPHERE);
+        DOCTEST_CHECK(ctx.getObjectType(sphere) == OBJECT_TYPE_SPHERE);
         DOCTEST_CHECK(ctx.getObjectArea(sphere) > 0);
         DOCTEST_CHECK(ctx.getSphereObjectCenter(sphere) == make_vec3(1, 1, 1));
         DOCTEST_CHECK(ctx.getSphereObjectSubdivisionCount(sphere) == 10);
@@ -847,14 +991,14 @@ TEST_CASE("Data and Object Management") {
         std::vector<uint> p_uuids;
         p_uuids.push_back(ctx.addTriangle(make_vec3(0, 0, 0), make_vec3(1, 0, 0), make_vec3(0, 1, 0)));
         uint polymesh = ctx.addPolymeshObject(p_uuids);
-        DOCTEST_CHECK(ctx.getPolymeshObjectPointer(polymesh)->getObjectType() == OBJECT_TYPE_POLYMESH);
+        DOCTEST_CHECK(ctx.getObjectType(polymesh) == OBJECT_TYPE_POLYMESH);
         DOCTEST_CHECK(ctx.getObjectArea(polymesh) > 0);
         DOCTEST_CHECK(ctx.getObjectCenter(polymesh).z == doctest::Approx(0.f));
 
         std::vector<vec3> nodes = {make_vec3(0, 0, 0), make_vec3(0, 0, 1)};
         std::vector<float> radii = {0.2f, 0.1f};
         uint tube = ctx.addTubeObject(10, nodes, radii);
-        DOCTEST_CHECK(ctx.getTubeObjectPointer(tube)->getObjectType() == OBJECT_TYPE_TUBE);
+        DOCTEST_CHECK(ctx.getObjectType(tube) == OBJECT_TYPE_TUBE);
         DOCTEST_CHECK(ctx.getObjectArea(tube) > 0);
         DOCTEST_CHECK(ctx.getObjectCenter(tube).z == doctest::Approx(0.5f));
         DOCTEST_CHECK(ctx.getTubeObjectSubdivisionCount(tube) == 10);
@@ -873,7 +1017,7 @@ TEST_CASE("Data and Object Management") {
         std::vector<vec3> new_nodes = {make_vec3(0, 0, 0), make_vec3(0, 0, 1), make_vec3(0, 0, 2)};
         ctx.setTubeNodes(tube, new_nodes);
         ctx.pruneTubeNodes(tube, 1);
-        DOCTEST_CHECK(ctx.getTubeObjectNodeCount(tube) == 1);
+        DOCTEST_CHECK_FALSE(ctx.doesObjectExist(tube));
     }
 
     SUBCASE("Object appearance and visibility") {
@@ -896,6 +1040,7 @@ TEST_CASE("Data and Object Management") {
     }
 
     SUBCASE("Primitive color and parent object") {
+        capture_cerr cerr_buffer; // Capture deprecation warnings from setPrimitiveColor/usePrimitiveTextureColor
         Context ctx;
         uint p = ctx.addPatch();
         ctx.setPrimitiveColor(p, RGB::red);
@@ -904,6 +1049,7 @@ TEST_CASE("Data and Object Management") {
         DOCTEST_CHECK(ctx.isPrimitiveTextureColorOverridden(p));
         ctx.usePrimitiveTextureColor(p);
         DOCTEST_CHECK(!ctx.isPrimitiveTextureColorOverridden(p));
+
         uint obj = ctx.addBoxObject(nullorigin, make_vec3(1, 1, 1), make_int3(2, 3, 2));
         ctx.setPrimitiveParentObjectID(p, obj);
         DOCTEST_CHECK(ctx.getPrimitiveParentObjectID(p) == obj);
@@ -915,35 +1061,29 @@ TEST_CASE("Object Management: Creation and Properties") {
         Context ctx;
         uint objID = ctx.addSphereObject(10, make_vec3(1, 2, 3), 5.f);
         DOCTEST_CHECK(ctx.doesObjectExist(objID));
-        Sphere *sphere = ctx.getSphereObjectPointer(objID);
-        DOCTEST_CHECK(sphere != nullptr);
-        DOCTEST_CHECK(sphere->getCenter() == make_vec3(1, 2, 3));
-        DOCTEST_CHECK(sphere->getRadius() == make_vec3(5.f, 5.f, 5.f));
-        DOCTEST_CHECK(sphere->getSubdivisionCount() == 10);
+        DOCTEST_CHECK(ctx.getSphereObjectCenter(objID) == make_vec3(1, 2, 3));
+        DOCTEST_CHECK(ctx.getSphereObjectRadius(objID) == make_vec3(5.f, 5.f, 5.f));
+        DOCTEST_CHECK(ctx.getSphereObjectSubdivisionCount(objID) == 10);
     }
 
     SUBCASE("addDiskObject") {
         Context ctx;
         uint objID = ctx.addDiskObject(make_int2(8, 16), make_vec3(1, 2, 3), make_vec2(4, 5), nullrotation, RGB::red);
         DOCTEST_CHECK(ctx.doesObjectExist(objID));
-        Disk *disk = ctx.getDiskObjectPointer(objID);
-        DOCTEST_CHECK(disk != nullptr);
-        DOCTEST_CHECK(disk->getCenter() == make_vec3(1, 2, 3));
-        DOCTEST_CHECK(disk->getSize() == make_vec2(4, 5));
-        DOCTEST_CHECK(disk->getSubdivisionCount() == make_int2(8, 16));
+        DOCTEST_CHECK(ctx.getDiskObjectCenter(objID) == make_vec3(1, 2, 3));
+        DOCTEST_CHECK(ctx.getDiskObjectSize(objID) == make_vec2(4, 5));
+        DOCTEST_CHECK(ctx.getDiskObjectSubdivisionCount(objID) == 8u);
     }
 
     SUBCASE("addConeObject") {
         Context ctx;
         uint objID = ctx.addConeObject(10, make_vec3(0, 0, 0), make_vec3(0, 0, 5), 2.f, 1.f);
         DOCTEST_CHECK(ctx.doesObjectExist(objID));
-        Cone *cone = ctx.getConeObjectPointer(objID);
-        DOCTEST_CHECK(cone != nullptr);
-        DOCTEST_CHECK(cone->getNodeCoordinate(0) == make_vec3(0, 0, 0));
-        DOCTEST_CHECK(cone->getNodeCoordinate(1) == make_vec3(0, 0, 5));
-        DOCTEST_CHECK(cone->getNodeRadius(0) == 2.f);
-        DOCTEST_CHECK(cone->getNodeRadius(1) == 1.f);
-        DOCTEST_CHECK(cone->getSubdivisionCount() == 10);
+        DOCTEST_CHECK(ctx.getConeObjectNode(objID, 0) == make_vec3(0, 0, 0));
+        DOCTEST_CHECK(ctx.getConeObjectNode(objID, 1) == make_vec3(0, 0, 5));
+        DOCTEST_CHECK(ctx.getConeObjectNodeRadius(objID, 0) == 2.f);
+        DOCTEST_CHECK(ctx.getConeObjectNodeRadius(objID, 1) == 1.f);
+        DOCTEST_CHECK(ctx.getConeObjectSubdivisionCount(objID) == 10);
     }
 }
 
@@ -1075,9 +1215,13 @@ TEST_CASE("Context primitive data calculations") {
     int int_val;
     ctx.getPrimitiveData(uuids[0], "int_val", int_val);
     DOCTEST_CHECK(int_val == 15);
-    capture_cerr cerr_buffer;
-    ctx.incrementPrimitiveData(uuids, "float_val", 1); // Wrong type, should warn
-    DOCTEST_CHECK(cerr_buffer.has_output());
+    bool has_warning;
+    {
+        capture_cerr cerr_buffer;
+        ctx.incrementPrimitiveData(uuids, "float_val", 1); // Wrong type, should warn
+        has_warning = cerr_buffer.has_output();
+    }
+    DOCTEST_CHECK(has_warning);
 }
 
 TEST_CASE("Context primitive data aggregation and filtering") {
@@ -1194,9 +1338,13 @@ TEST_CASE("Global data") {
     int val;
     ctx.getGlobalData("inc_me", val);
     DOCTEST_CHECK(val == 15);
-    capture_cerr cerr_buffer;
-    ctx.incrementGlobalData("g_float", 1); // Wrong type
-    DOCTEST_CHECK(cerr_buffer.has_output());
+    bool has_warning;
+    {
+        capture_cerr cerr_buffer;
+        ctx.incrementGlobalData("g_float", 1); // Wrong type
+        has_warning = cerr_buffer.has_output();
+    }
+    DOCTEST_CHECK(has_warning);
 }
 
 TEST_CASE("Voxel Management") {
@@ -1233,6 +1381,7 @@ TEST_CASE("Voxel Management") {
 
 TEST_CASE("Texture Management") {
     SUBCASE("texture validation and properties") {
+        capture_cerr cerr_buffer; // Capture deprecation warnings from setPrimitiveTextureFile
         Context ctx;
 
         uint patch = ctx.addPatch(make_vec3(0, 0, 0), make_vec2(1, 1), nullrotation, "lib/images/solid.jpg");
@@ -1314,8 +1463,7 @@ TEST_CASE("UUID and Object Management") {
         ctx.cleanDeletedObjectIDs(triple_nested_obj);
         DOCTEST_CHECK(triple_nested_obj[0][0].size() == 1);
 
-        Box *box_ptr = ctx.getBoxObjectPointer(obj);
-        DOCTEST_CHECK(box_ptr != nullptr);
+        DOCTEST_CHECK(ctx.doesObjectExist(obj));
 
         vec3 new_origin = make_vec3(5, 5, 5);
         ctx.setObjectOrigin(obj, new_origin);
@@ -1376,6 +1524,151 @@ TEST_CASE("Tube Object Management") {
         ctx.appendTubeSegment(tube, make_vec3(0, 0, 2), 0.05f, "lib/images/solid.jpg", make_vec2(0.5f, 1.0f));
         DOCTEST_CHECK(ctx.getTubeObjectNodeCount(tube) == 3);
     }
+
+    SUBCASE("setTubeNodes preserves color-to-segment mapping") {
+        // Regression test: updateTriangleVertices() must use the same loop order
+        // as addTubeObject() to maintain correct UUID-to-vertex mapping.
+        Context ctx;
+        std::vector<vec3> nodes = {make_vec3(0, 0, 0), make_vec3(0, 0, 1), make_vec3(0, 0, 2), make_vec3(0, 0, 3)};
+        std::vector<float> radii = {0.5f, 0.5f, 0.5f, 0.5f};
+        std::vector<RGBcolor> colors = {RGB::red, RGB::yellow, RGB::green, RGB::blue};
+
+        int subdiv = 8;
+        uint tube = ctx.addTubeObject(subdiv, nodes, radii, colors);
+
+        // Translate nodes slightly — this calls updateTriangleVertices()
+        std::vector<vec3> new_nodes = nodes;
+        for (auto &n : new_nodes) n.x += 0.1f;
+        ctx.setTubeNodes(tube, new_nodes);
+
+        // Verify: each triangle's vertices should be near the segment matching its color.
+        // Segment i spans from new_nodes[i].z to new_nodes[i+1].z.
+        // A triangle with color.at(i) should have all vertices with z in [nodes[i].z, nodes[i+1].z].
+        std::vector<uint> uuids = ctx.getObjectPrimitiveUUIDs(tube);
+        int mismatches = 0;
+        for (uint uuid : uuids) {
+            RGBcolor c = ctx.getPrimitiveColorRGB(uuid);
+
+            // Determine which segment this triangle belongs to based on its color
+            int expected_segment = -1;
+            if (c.r == RGB::red.r && c.g == RGB::red.g && c.b == RGB::red.b) expected_segment = 0;
+            else if (c.r == RGB::yellow.r && c.g == RGB::yellow.g && c.b == RGB::yellow.b) expected_segment = 1;
+            else if (c.r == RGB::green.r && c.g == RGB::green.g && c.b == RGB::green.b) expected_segment = 2;
+
+            DOCTEST_REQUIRE(expected_segment >= 0);
+
+            float z_min = new_nodes[expected_segment].z;
+            float z_max = new_nodes[expected_segment + 1].z;
+
+            // Check all 3 vertices are within the segment's z-range (with tolerance for radial offset)
+            for (uint v = 0; v < 3; v++) {
+                vec3 vert = ctx.getTriangleVertex(uuid, v);
+                if (vert.z < z_min - 0.01f || vert.z > z_max + 0.01f) {
+                    mismatches++;
+                    break;
+                }
+            }
+        }
+        DOCTEST_CHECK_MESSAGE(mismatches == 0, "Found " << mismatches << " triangles with vertices outside their color's segment range after setTubeNodes()");
+    }
+
+    SUBCASE("pruneTubeNodes deletes correct primitives") {
+        Context ctx;
+        // 4 nodes → 3 segments. Prune at index 3 → keep 2 segments (nodes 0,1,2).
+        std::vector<vec3> nodes = {make_vec3(0, 0, 0), make_vec3(0, 0, 1), make_vec3(0, 0, 2), make_vec3(0, 0, 3)};
+        std::vector<float> radii = {0.5f, 0.5f, 0.5f, 0.5f};
+        std::vector<RGBcolor> colors = {RGB::red, RGB::yellow, RGB::green, RGB::blue};
+
+        int subdiv = 8;
+        uint tube = ctx.addTubeObject(subdiv, nodes, radii, colors);
+
+        uint uuids_before = ctx.getObjectPrimitiveUUIDs(tube).size();
+        // 3 segments * 8 subdivisions * 2 triangles/subdivision = 48
+        DOCTEST_CHECK(uuids_before == 48);
+
+        ctx.pruneTubeNodes(tube, 3);
+
+        // Object should still exist with 3 nodes (2 segments)
+        DOCTEST_CHECK(ctx.doesObjectExist(tube));
+        DOCTEST_CHECK(ctx.getTubeObjectNodeCount(tube) == 3);
+
+        // 2 segments * 8 subdivisions * 2 triangles = 32
+        std::vector<uint> remaining = ctx.getObjectPrimitiveUUIDs(tube);
+        DOCTEST_CHECK(remaining.size() == 32);
+
+        // All remaining triangles should have colors from segments 0 or 1 (red or yellow)
+        int bad_colors = 0;
+        for (uint uuid : remaining) {
+            RGBcolor c = ctx.getPrimitiveColorRGB(uuid);
+            bool is_red = (c.r == RGB::red.r && c.g == RGB::red.g && c.b == RGB::red.b);
+            bool is_yellow = (c.r == RGB::yellow.r && c.g == RGB::yellow.g && c.b == RGB::yellow.b);
+            if (!is_red && !is_yellow) bad_colors++;
+        }
+        DOCTEST_CHECK(bad_colors == 0);
+
+        // Pruning to 1 node should delete the object entirely
+        ctx.pruneTubeNodes(tube, 1);
+        DOCTEST_CHECK_FALSE(ctx.doesObjectExist(tube));
+    }
+
+    SUBCASE("setTubeNodes maintains circular cross-sections after bending") {
+        Context ctx;
+        // Create a straight vertical tube
+        std::vector<vec3> nodes = {make_vec3(0, 0, 0), make_vec3(0, 0, 1), make_vec3(0, 0, 2)};
+        std::vector<float> radii = {0.5f, 0.5f, 0.5f};
+        int subdiv = 16;
+        uint tube = ctx.addTubeObject(subdiv, nodes, radii);
+
+        // Bend the tube 90 degrees at the tip
+        std::vector<vec3> bent_nodes = {make_vec3(0, 0, 0), make_vec3(0, 0, 1), make_vec3(1, 0, 1)};
+        ctx.setTubeNodes(tube, bent_nodes);
+
+        // Verify cross-sections are circular and perpendicular to the local axis:
+        // For each triangle vertex, find the nearest node, check that the radial vector
+        // (vertex - node) is perpendicular to the local axis and has the correct magnitude.
+        std::vector<uint> uuids = ctx.getObjectPrimitiveUUIDs(tube);
+
+        // Compute axial directions at each node
+        std::vector<vec3> axial(3);
+        axial[0] = (bent_nodes[1] - bent_nodes[0]);
+        axial[0].normalize();
+        axial[1] = 0.5f * ((bent_nodes[1] - bent_nodes[0]) + (bent_nodes[2] - bent_nodes[1]));
+        axial[1].normalize();
+        axial[2] = (bent_nodes[2] - bent_nodes[1]);
+        axial[2].normalize();
+
+        int perp_failures = 0;
+        int radius_failures = 0;
+
+        for (uint uuid : uuids) {
+            for (uint v = 0; v < 3; v++) {
+                vec3 vert = ctx.getTriangleVertex(uuid, v);
+
+                // Find nearest node
+                int nearest = 0;
+                float min_dist = (vert - bent_nodes[0]).magnitude();
+                for (int n = 1; n < 3; n++) {
+                    float d = (vert - bent_nodes[n]).magnitude();
+                    if (d < min_dist) {
+                        min_dist = d;
+                        nearest = n;
+                    }
+                }
+
+                vec3 radial = vert - bent_nodes[nearest];
+                float dot = fabs(radial * axial[nearest]);
+                if (dot > 0.02f) {
+                    perp_failures++;
+                }
+                if (fabs(radial.magnitude() - 0.5f) > 0.02f) {
+                    radius_failures++;
+                }
+            }
+        }
+
+        DOCTEST_CHECK_MESSAGE(perp_failures == 0, "Found " << perp_failures << " vertices not perpendicular to local tube axis after bending");
+        DOCTEST_CHECK_MESSAGE(radius_failures == 0, "Found " << radius_failures << " vertices with incorrect radius after bending");
+    }
 }
 
 TEST_CASE("Edge Cases and Additional Coverage") {
@@ -1423,6 +1716,7 @@ TEST_CASE("Edge Cases and Additional Coverage") {
     }
 
     SUBCASE("texture edge cases") {
+        capture_cerr cerr_buffer; // Capture deprecation warnings from overridePrimitiveTextureColor/usePrimitiveTextureColor
         Context ctx;
         uint patch = ctx.addPatch();
 
@@ -1524,6 +1818,7 @@ TEST_CASE("Edge Cases and Additional Coverage") {
     }
 
     SUBCASE("primitive color operations") {
+        capture_cerr cerr_buffer; // Suppress deprecation warnings from setPrimitiveColor
         Context ctx;
         uint p = ctx.addPatch();
 
@@ -1545,6 +1840,7 @@ TEST_CASE("Edge Cases and Additional Coverage") {
     }
 
     SUBCASE("object color operations") {
+        capture_cerr cerr_buffer; // Suppress deprecation warnings from setObjectColor (calls setPrimitiveColor internally)
         Context ctx;
         uint obj = ctx.addBoxObject(make_vec3(0, 0, 0), make_vec3(1, 1, 1), make_int3(1, 1, 1));
 
@@ -1564,13 +1860,18 @@ TEST_CASE("Print and Information Functions") {
         uint obj = ctx.addBoxObject(make_vec3(0, 0, 0), make_vec3(1, 1, 1), make_int3(1, 1, 1));
 
         // Capture stdout output from these functions
-        capture_cout cout_buffer;
-        DOCTEST_CHECK_NOTHROW(ctx.printPrimitiveInfo(patch));
-        DOCTEST_CHECK_NOTHROW(ctx.printObjectInfo(obj));
+        bool has_output;
+        std::string output;
+        {
+            capture_cout cout_buffer;
+            DOCTEST_CHECK_NOTHROW(ctx.printPrimitiveInfo(patch));
+            DOCTEST_CHECK_NOTHROW(ctx.printObjectInfo(obj));
+            has_output = cout_buffer.has_output();
+            output = cout_buffer.get_captured_output();
+        } // cout_buffer destroyed here
 
         // Verify that output was captured (functions should produce output)
-        DOCTEST_CHECK(cout_buffer.has_output());
-        std::string output = cout_buffer.get_captured_output();
+        DOCTEST_CHECK(has_output);
         DOCTEST_CHECK(output.find("Info for UUID") != std::string::npos);
         DOCTEST_CHECK(output.find("Info for ObjID") != std::string::npos);
     }
@@ -1581,31 +1882,25 @@ TEST_CASE("Object Pointer Access") {
         Context ctx;
 
         uint box = ctx.addBoxObject(make_vec3(0, 0, 0), make_vec3(1, 1, 1), make_int3(1, 1, 1));
-        Box *box_ptr = ctx.getBoxObjectPointer(box);
-        DOCTEST_CHECK(box_ptr != nullptr);
+        DOCTEST_CHECK(ctx.doesObjectExist(box));
 
         uint disk = ctx.addDiskObject(10, make_vec3(0, 0, 0), make_vec2(1, 1));
-        Disk *disk_ptr = ctx.getDiskObjectPointer(disk);
-        DOCTEST_CHECK(disk_ptr != nullptr);
+        DOCTEST_CHECK(ctx.doesObjectExist(disk));
 
         uint sphere = ctx.addSphereObject(10, make_vec3(0, 0, 0), 1.f);
-        Sphere *sphere_ptr = ctx.getSphereObjectPointer(sphere);
-        DOCTEST_CHECK(sphere_ptr != nullptr);
+        DOCTEST_CHECK(ctx.doesObjectExist(sphere));
 
         std::vector<vec3> nodes = {make_vec3(0, 0, 0), make_vec3(0, 0, 1)};
         std::vector<float> radii = {0.2f, 0.1f};
         uint tube = ctx.addTubeObject(10, nodes, radii);
-        Tube *tube_ptr = ctx.getTubeObjectPointer(tube);
-        DOCTEST_CHECK(tube_ptr != nullptr);
+        DOCTEST_CHECK(ctx.doesObjectExist(tube));
 
         uint cone = ctx.addConeObject(10, make_vec3(0, 0, 0), make_vec3(0, 0, 1), 0.5f, 0.3f);
-        Cone *cone_ptr = ctx.getConeObjectPointer(cone);
-        DOCTEST_CHECK(cone_ptr != nullptr);
+        DOCTEST_CHECK(ctx.doesObjectExist(cone));
 
         std::vector<uint> prim_uuids = {ctx.addTriangle(make_vec3(0, 0, 0), make_vec3(1, 0, 0), make_vec3(0, 1, 0))};
         uint polymesh = ctx.addPolymeshObject(prim_uuids);
-        Polymesh *polymesh_ptr = ctx.getPolymeshObjectPointer(polymesh);
-        DOCTEST_CHECK(polymesh_ptr != nullptr);
+        DOCTEST_CHECK(ctx.doesObjectExist(polymesh));
     }
 }
 
@@ -1803,6 +2098,63 @@ TEST_CASE("Missing Data and State Functions") {
         DOCTEST_CHECK(vars.size() >= 2);
         DOCTEST_CHECK(std::find(vars.begin(), vars.end(), "temp") != vars.end());
         DOCTEST_CHECK(std::find(vars.begin(), vars.end(), "humidity") != vars.end());
+    }
+
+    SUBCASE("clearTimeseriesData") {
+        Context ctx;
+        Date date = make_Date(1, 1, 2025);
+        Time time = make_Time(0, 0, 12);
+
+        // Add some timeseries data
+        ctx.addTimeseriesData("temp", 25.5f, date, time);
+        ctx.addTimeseriesData("humidity", 60.0f, date, time);
+        DOCTEST_CHECK(ctx.listTimeseriesVariables().size() == 2);
+        DOCTEST_CHECK(ctx.doesTimeseriesVariableExist("temp"));
+
+        // Clear and verify
+        ctx.clearTimeseriesData();
+        DOCTEST_CHECK(ctx.listTimeseriesVariables().empty());
+        DOCTEST_CHECK_FALSE(ctx.doesTimeseriesVariableExist("temp"));
+        DOCTEST_CHECK_FALSE(ctx.doesTimeseriesVariableExist("humidity"));
+
+        // Calling on already-empty context should be a no-op
+        ctx.clearTimeseriesData();
+        DOCTEST_CHECK(ctx.listTimeseriesVariables().empty());
+    }
+
+    SUBCASE("deleteTimeseriesVariable") {
+        Context ctx;
+        Date date = make_Date(1, 1, 2025);
+        Time time0 = make_Time(0, 0, 12);
+        Time time1 = make_Time(1, 0, 12);
+
+        ctx.addTimeseriesData("temp", 25.5f, date, time0);
+        ctx.addTimeseriesData("temp", 26.5f, date, time1);
+        ctx.addTimeseriesData("humidity", 60.0f, date, time0);
+        DOCTEST_CHECK(ctx.listTimeseriesVariables().size() == 2);
+
+        // Delete one variable; the other must remain intact and queryable.
+        ctx.deleteTimeseriesVariable("temp");
+        DOCTEST_CHECK_FALSE(ctx.doesTimeseriesVariableExist("temp"));
+        DOCTEST_CHECK(ctx.doesTimeseriesVariableExist("humidity"));
+        DOCTEST_CHECK(ctx.getTimeseriesLength("humidity") == 1);
+        DOCTEST_CHECK(ctx.queryTimeseriesData("humidity", 0) == doctest::Approx(60.0f));
+
+        // Re-adding the same label after deletion creates a fresh series.
+        ctx.addTimeseriesData("temp", 99.9f, date, time0);
+        DOCTEST_CHECK(ctx.doesTimeseriesVariableExist("temp"));
+        DOCTEST_CHECK(ctx.getTimeseriesLength("temp") == 1);
+        DOCTEST_CHECK(ctx.queryTimeseriesData("temp", 0) == doctest::Approx(99.9f));
+
+        // Deleting a non-existent variable warns but does not throw.
+        std::string captured;
+        {
+            capture_cerr cerr_buffer;
+            DOCTEST_CHECK_NOTHROW(ctx.deleteTimeseriesVariable("nonexistent"));
+            captured = cerr_buffer.get_captured_output();
+        }
+        DOCTEST_CHECK(captured.find("WARNING") != std::string::npos);
+        DOCTEST_CHECK(captured.find("nonexistent") != std::string::npos);
     }
 
     SUBCASE("getUniquePrimitiveParentObjectIDs") {
@@ -2379,5 +2731,800 @@ TEST_CASE("File path resolution priority") {
             std::filesystem::remove(testTexturePath);
             std::filesystem::remove("test_models");
         }
+    }
+
+    SUBCASE("Material System - Label-Based Creation") {
+        Context ctx;
+
+        // Default material should exist (but not counted in getMaterialCount or listMaterials)
+        DOCTEST_CHECK(ctx.doesMaterialExist("__default__"));
+        DOCTEST_CHECK(ctx.getMaterialCount() == 0); // No user-created materials yet
+
+        // Create materials with labels
+        ctx.addMaterial("leaf_material");
+        DOCTEST_CHECK(ctx.doesMaterialExist("leaf_material"));
+        DOCTEST_CHECK(ctx.getMaterialCount() == 1);
+
+        ctx.addMaterial("bark_material");
+        DOCTEST_CHECK(ctx.doesMaterialExist("bark_material"));
+        DOCTEST_CHECK(ctx.getMaterialCount() == 2);
+
+        // List materials (only user-created, not default or auto-generated)
+        std::vector<std::string> labels = ctx.listMaterials();
+        DOCTEST_CHECK(labels.size() == 2);
+
+        // Reserved labels should fail
+        DOCTEST_CHECK_THROWS(ctx.addMaterial("__reserved"));
+    }
+
+    SUBCASE("Material System - Rename") {
+        Context ctx;
+
+        // Create a triangle with a texture to generate an auto-material
+        uint UUID = ctx.addTriangle(make_vec3(0, 0, 0), make_vec3(1, 0, 0), make_vec3(0, 1, 0), "lib/images/disk_texture.png", make_vec2(0, 0), make_vec2(1, 0), make_vec2(0, 1));
+        std::string auto_label = ctx.getPrimitiveMaterialLabel(UUID);
+        DOCTEST_CHECK(auto_label.substr(0, 7) == "__auto_");
+        DOCTEST_CHECK(ctx.doesMaterialExist(auto_label));
+
+        // Rename the auto-generated material
+        ctx.renameMaterial(auto_label, "bean_trifoliate_leaf");
+        DOCTEST_CHECK(ctx.doesMaterialExist("bean_trifoliate_leaf"));
+        // Auto-label is retained as a lookup alias for deduplication
+        DOCTEST_CHECK(ctx.doesMaterialExist(auto_label));
+
+        // Primitive should now report the new display label
+        DOCTEST_CHECK(ctx.getPrimitiveMaterialLabel(UUID) == "bean_trifoliate_leaf");
+
+        // Properties should be preserved
+        std::string tex = ctx.getMaterialTexture("bean_trifoliate_leaf");
+        DOCTEST_CHECK(tex == "lib/images/disk_texture.png");
+
+        // Deduplication: a new triangle with the same texture should reuse the renamed material
+        uint UUID2 = ctx.addTriangle(make_vec3(2, 0, 0), make_vec3(3, 0, 0), make_vec3(2, 1, 0), "lib/images/disk_texture.png", make_vec2(0, 0), make_vec2(1, 0), make_vec2(0, 1));
+        DOCTEST_CHECK(ctx.getPrimitiveMaterialLabel(UUID2) == "bean_trifoliate_leaf");
+
+        // Rename a user-created (non-auto) material — old label should NOT be retained
+        ctx.addMaterial("old_name");
+        ctx.renameMaterial("old_name", "new_name");
+        DOCTEST_CHECK(ctx.doesMaterialExist("new_name"));
+        DOCTEST_CHECK(!ctx.doesMaterialExist("old_name"));
+
+        // Error cases
+        DOCTEST_CHECK_THROWS(ctx.renameMaterial("nonexistent", "new_name2"));             // old label doesn't exist
+        DOCTEST_CHECK_THROWS(ctx.renameMaterial("bean_trifoliate_leaf", "__reserved"));    // new label reserved
+        DOCTEST_CHECK_THROWS(ctx.renameMaterial("bean_trifoliate_leaf", "new_name"));     // new label already exists
+        DOCTEST_CHECK_THROWS(ctx.renameMaterial("bean_trifoliate_leaf", ""));              // empty label
+    }
+
+    SUBCASE("Material System - Properties") {
+        Context ctx;
+
+        // Create and set material properties
+        ctx.addMaterial("test_mat");
+
+        RGBAcolor purple = make_RGBAcolor(0.5f, 0, 0.5f, 1);
+        ctx.setMaterialColor("test_mat", purple);
+
+        RGBAcolor color = ctx.getMaterialColor("test_mat");
+        DOCTEST_CHECK(color.r == doctest::Approx(0.5f).epsilon(0.001));
+        DOCTEST_CHECK(color.g == doctest::Approx(0.0f).epsilon(0.001));
+        DOCTEST_CHECK(color.b == doctest::Approx(0.5f).epsilon(0.001));
+
+        // Set texture
+        ctx.setMaterialTexture("test_mat", "lib/images/disk_texture.png");
+        std::string tex = ctx.getMaterialTexture("test_mat");
+        DOCTEST_CHECK(tex == "lib/images/disk_texture.png");
+
+        // Texture override
+        ctx.setMaterialTextureColorOverride("test_mat", true);
+        DOCTEST_CHECK(ctx.isMaterialTextureColorOverridden("test_mat"));
+
+        ctx.setMaterialTextureColorOverride("test_mat", false);
+        DOCTEST_CHECK(!ctx.isMaterialTextureColorOverridden("test_mat"));
+
+        // Twosided flag - test default value
+        DOCTEST_CHECK(ctx.getMaterialTwosidedFlag("test_mat") == 1); // Default is 1 (two-sided)
+
+        // Twosided flag - set to 0 (one-sided)
+        ctx.setMaterialTwosidedFlag("test_mat", 0);
+        DOCTEST_CHECK(ctx.getMaterialTwosidedFlag("test_mat") == 0);
+
+        // Twosided flag - set back to 1 (two-sided)
+        ctx.setMaterialTwosidedFlag("test_mat", 1);
+        DOCTEST_CHECK(ctx.getMaterialTwosidedFlag("test_mat") == 1);
+    }
+
+    SUBCASE("Material System - Assignment to Primitives") {
+        Context ctx;
+
+        // Create material
+        ctx.addMaterial("red_mat");
+        ctx.setMaterialColor("red_mat", make_RGBAcolor(1, 0, 0, 1));
+
+        // Create primitives with default color
+        uint p1 = ctx.addPatch(make_vec3(0, 0, 0), make_vec2(1, 1), make_SphericalCoord(0, 0), make_RGBcolor(0, 0, 0));
+        uint p2 = ctx.addPatch(make_vec3(1, 0, 0), make_vec2(1, 1), make_SphericalCoord(0, 0), make_RGBcolor(0, 0, 0));
+
+        // Assign material
+        ctx.assignMaterialToPrimitive(p1, "red_mat");
+        ctx.assignMaterialToPrimitive(p2, "red_mat");
+
+        // Check primitive material label
+        DOCTEST_CHECK(ctx.getPrimitiveMaterialLabel(p1) == "red_mat");
+        DOCTEST_CHECK(ctx.getPrimitiveMaterialLabel(p2) == "red_mat");
+
+        // Check primitive color reflects material
+        RGBcolor c1 = ctx.getPrimitiveColor(p1);
+        DOCTEST_CHECK(c1.r == doctest::Approx(1.0f).epsilon(0.001));
+        DOCTEST_CHECK(c1.g == doctest::Approx(0.0f).epsilon(0.001));
+
+        // Modify material - should affect both primitives
+        ctx.setMaterialColor("red_mat", make_RGBAcolor(0, 1, 0, 1)); // Green
+
+        c1 = ctx.getPrimitiveColor(p1);
+        RGBcolor c2 = ctx.getPrimitiveColor(p2);
+        DOCTEST_CHECK(c1.g == doctest::Approx(1.0f).epsilon(0.001));
+        DOCTEST_CHECK(c2.g == doctest::Approx(1.0f).epsilon(0.001));
+
+        // Reverse lookup
+        std::vector<uint> users = ctx.getPrimitivesUsingMaterial("red_mat");
+        DOCTEST_CHECK(users.size() == 2);
+    }
+
+    SUBCASE("Material System - Batch Assignment") {
+        Context ctx;
+
+        ctx.addMaterial("batch_mat");
+        ctx.setMaterialColor("batch_mat", make_RGBAcolor(0.5f, 0.5f, 0.5f, 1));
+
+        std::vector<uint> UUIDs;
+        for (int i = 0; i < 10; i++) {
+            UUIDs.push_back(ctx.addPatch(make_vec3(i, 0, 0), make_vec2(1, 1), make_SphericalCoord(0, 0), make_RGBcolor(0, 0, 0)));
+        }
+
+        // Batch assign
+        ctx.assignMaterialToPrimitive(UUIDs, "batch_mat");
+
+        // Verify all have the material
+        for (uint uuid: UUIDs) {
+            DOCTEST_CHECK(ctx.getPrimitiveMaterialLabel(uuid) == "batch_mat");
+        }
+    }
+
+    SUBCASE("Material System - Deletion") {
+        Context ctx;
+
+        ctx.addMaterial("temp_mat");
+        ctx.setMaterialColor("temp_mat", make_RGBAcolor(1, 0, 0, 1));
+
+        uint p1 = ctx.addPatch(make_vec3(0, 0, 0), make_vec2(1, 1), make_SphericalCoord(0, 0), make_RGBcolor(0, 0, 0));
+        ctx.assignMaterialToPrimitive(p1, "temp_mat");
+
+        // Delete material - primitive should revert to default
+        capture_cerr c; // Capture warning about material in use
+        ctx.deleteMaterial("temp_mat");
+
+        DOCTEST_CHECK(!ctx.doesMaterialExist("temp_mat"));
+        DOCTEST_CHECK(ctx.getPrimitiveMaterialLabel(p1) == "__default__");
+    }
+
+    SUBCASE("Material System - XML Round-Trip") {
+        Context ctx;
+
+        // Create materials
+        ctx.addMaterial("red_mat");
+        ctx.setMaterialColor("red_mat", make_RGBAcolor(1, 0, 0, 1));
+
+        ctx.addMaterial("textured_mat");
+        ctx.setMaterialColor("textured_mat", make_RGBAcolor(0, 1, 0, 1));
+        ctx.setMaterialTexture("textured_mat", "lib/images/disk_texture.png");
+
+        // Create a material with non-default twosided_flag
+        ctx.addMaterial("onesided_mat");
+        ctx.setMaterialColor("onesided_mat", make_RGBAcolor(0, 0, 1, 1));
+        ctx.setMaterialTwosidedFlag("onesided_mat", 0); // One-sided
+
+        // Create and assign primitives
+        uint p1 = ctx.addPatch(make_vec3(0, 0, 0), make_vec2(1, 1), make_SphericalCoord(0, 0), make_RGBcolor(0, 0, 0));
+        uint p2 = ctx.addPatch(make_vec3(1, 0, 0), make_vec2(1, 1), make_SphericalCoord(0, 0), make_RGBcolor(0, 0, 0));
+        uint p3 = ctx.addPatch(make_vec3(2, 0, 0), make_vec2(1, 1), make_SphericalCoord(0, 0), make_RGBcolor(0, 0, 0));
+        uint p4 = ctx.addPatch(make_vec3(3, 0, 0), make_vec2(1, 1), make_SphericalCoord(0, 0), make_RGBcolor(0, 0, 0));
+
+        ctx.assignMaterialToPrimitive(p1, "red_mat");
+        ctx.assignMaterialToPrimitive(p2, "textured_mat");
+        ctx.assignMaterialToPrimitive(p3, "red_mat");
+        ctx.assignMaterialToPrimitive(p4, "onesided_mat");
+
+        // Write to XML
+        ctx.writeXML("test_materials.xml", {p1, p2, p3, p4}, true);
+
+        // Load into new context
+        Context ctx2;
+        std::vector<uint> loaded_UUIDs = ctx2.loadXML("test_materials.xml", true);
+
+        DOCTEST_CHECK(loaded_UUIDs.size() == 4);
+
+        // Verify materials were preserved
+        DOCTEST_CHECK(ctx2.doesMaterialExist("red_mat"));
+        DOCTEST_CHECK(ctx2.doesMaterialExist("textured_mat"));
+        DOCTEST_CHECK(ctx2.doesMaterialExist("onesided_mat"));
+
+        RGBcolor loaded_color1 = ctx2.getPrimitiveColor(loaded_UUIDs[0]);
+        DOCTEST_CHECK(loaded_color1.r == doctest::Approx(1.0f).epsilon(0.001));
+
+        DOCTEST_CHECK(ctx2.getPrimitiveTextureFile(loaded_UUIDs[1]) == "lib/images/disk_texture.png");
+
+        // Verify twosided_flag was preserved
+        DOCTEST_CHECK(ctx2.getMaterialTwosidedFlag("red_mat") == 1); // Default
+        DOCTEST_CHECK(ctx2.getMaterialTwosidedFlag("textured_mat") == 1); // Default
+        DOCTEST_CHECK(ctx2.getMaterialTwosidedFlag("onesided_mat") == 0); // Non-default
+
+        // Clean up
+        std::filesystem::remove("test_materials.xml");
+    }
+
+    SUBCASE("getPrimitiveTwosidedFlag helper function") {
+        Context ctx;
+
+        // Create materials with different twosided_flag values
+        ctx.addMaterial("onesided_mat");
+        ctx.setMaterialTwosidedFlag("onesided_mat", 0);
+
+        ctx.addMaterial("twosided_mat");
+        ctx.setMaterialTwosidedFlag("twosided_mat", 1);
+
+        ctx.addMaterial("transparent_mat");
+        ctx.setMaterialTwosidedFlag("transparent_mat", 2);
+
+        // Create primitives
+        uint UUID_mat_onesided = ctx.addPatch(make_vec3(0, 0, 0), make_vec2(1, 1));
+        uint UUID_mat_twosided = ctx.addPatch(make_vec3(1, 0, 0), make_vec2(1, 1));
+        uint UUID_mat_transparent = ctx.addPatch(make_vec3(2, 0, 0), make_vec2(1, 1));
+        uint UUID_prim_data = ctx.addPatch(make_vec3(3, 0, 0), make_vec2(1, 1));
+        uint UUID_default = ctx.addPatch(make_vec3(4, 0, 0), make_vec2(1, 1));
+
+        // Assign materials
+        ctx.assignMaterialToPrimitive(UUID_mat_onesided, "onesided_mat");
+        ctx.assignMaterialToPrimitive(UUID_mat_twosided, "twosided_mat");
+        ctx.assignMaterialToPrimitive(UUID_mat_transparent, "transparent_mat");
+
+        // Set primitive data on one primitive (no user material assigned)
+        ctx.setPrimitiveData(UUID_prim_data, "twosided_flag", uint(0));
+
+        // Test: Material takes precedence - one-sided material
+        DOCTEST_CHECK(ctx.getPrimitiveTwosidedFlag(UUID_mat_onesided) == 0);
+
+        // Test: Material takes precedence - two-sided material
+        DOCTEST_CHECK(ctx.getPrimitiveTwosidedFlag(UUID_mat_twosided) == 1);
+
+        // Test: Material supports values > 1 (transparent)
+        DOCTEST_CHECK(ctx.getPrimitiveTwosidedFlag(UUID_mat_transparent) == 2);
+
+        // Test: Primitive data fallback (no user material)
+        DOCTEST_CHECK(ctx.getPrimitiveTwosidedFlag(UUID_prim_data) == 0);
+
+        // Test: Default value when no material or primitive data
+        DOCTEST_CHECK(ctx.getPrimitiveTwosidedFlag(UUID_default) == 1);
+
+        // Test: Custom default value
+        DOCTEST_CHECK(ctx.getPrimitiveTwosidedFlag(UUID_default, 2) == 2);
+
+        // Test: Material takes precedence over primitive data
+        // First, set primitive data on a primitive with a material
+        ctx.setPrimitiveData(UUID_mat_onesided, "twosided_flag", uint(1)); // Try to override with primitive data
+        DOCTEST_CHECK(ctx.getPrimitiveTwosidedFlag(UUID_mat_onesided) == 0); // Should still return material value (0)
+    }
+
+    SUBCASE("Material Data - Setting and Getting with Labels") {
+        Context ctx;
+
+        // Create a material
+        ctx.addMaterial("data_mat");
+
+        // Test uint data
+        ctx.setMaterialData("data_mat", "twosided_flag", 1u);
+        DOCTEST_CHECK(ctx.doesMaterialDataExist("data_mat", "twosided_flag"));
+        DOCTEST_CHECK(ctx.getMaterialDataType("data_mat", "twosided_flag") == HELIOS_TYPE_UINT);
+        uint flag_val;
+        ctx.getMaterialData("data_mat", "twosided_flag", flag_val);
+        DOCTEST_CHECK(flag_val == 1u);
+
+        // Test int data
+        ctx.setMaterialData("data_mat", "test_int", -42);
+        int int_val;
+        ctx.getMaterialData("data_mat", "test_int", int_val);
+        DOCTEST_CHECK(int_val == -42);
+
+        // Test float data
+        ctx.setMaterialData("data_mat", "test_float", 3.14f);
+        float float_val;
+        ctx.getMaterialData("data_mat", "test_float", float_val);
+        DOCTEST_CHECK(float_val == doctest::Approx(3.14f).epsilon(0.001));
+
+        // Test vec3 data
+        vec3 test_vec = make_vec3(1, 2, 3);
+        ctx.setMaterialData("data_mat", "test_vec3", test_vec);
+        vec3 vec_val;
+        ctx.getMaterialData("data_mat", "test_vec3", vec_val);
+        DOCTEST_CHECK(vec_val.x == doctest::Approx(1.0f).epsilon(0.001));
+        DOCTEST_CHECK(vec_val.y == doctest::Approx(2.0f).epsilon(0.001));
+        DOCTEST_CHECK(vec_val.z == doctest::Approx(3.0f).epsilon(0.001));
+
+        // Test string data
+        ctx.setMaterialData("data_mat", "test_string", std::string("hello"));
+        std::string str_val;
+        ctx.getMaterialData("data_mat", "test_string", str_val);
+        DOCTEST_CHECK(str_val == "hello");
+
+        // Test clearing data
+        ctx.clearMaterialData("data_mat", "test_int");
+        DOCTEST_CHECK(!ctx.doesMaterialDataExist("data_mat", "test_int"));
+    }
+
+    SUBCASE("Material Data - Fallback Helper Method") {
+        Context ctx;
+
+        // Create material with data
+        ctx.addMaterial("fallback_mat");
+        ctx.setMaterialData("fallback_mat", "twosided_flag", 0u);
+
+        // Create primitive with this material
+        uint p1 = ctx.addPatch(make_vec3(0, 0, 0), make_vec2(1, 1), make_SphericalCoord(0, 0), make_RGBcolor(0, 0, 0));
+        ctx.assignMaterialToPrimitive(p1, "fallback_mat");
+
+        // Test getDataWithMaterialFallback - should get data from material
+        uint flag_val;
+        ctx.getDataWithMaterialFallback(p1, "twosided_flag", flag_val);
+        DOCTEST_CHECK(flag_val == 0u);
+
+        // Create another primitive with material but add primitive-specific data
+        uint p2 = ctx.addPatch(make_vec3(1, 0, 0), make_vec2(1, 1), make_SphericalCoord(0, 0), make_RGBcolor(0, 0, 0));
+        ctx.assignMaterialToPrimitive(p2, "fallback_mat");
+        ctx.setPrimitiveData(p2, "custom_data", 42);
+
+        // Test fallback - should get data from primitive since material doesn't have it
+        int custom_val;
+        ctx.getDataWithMaterialFallback(p2, "custom_data", custom_val);
+        DOCTEST_CHECK(custom_val == 42);
+
+        // Create third primitive with no special data
+        uint p3 = ctx.addPatch(make_vec3(2, 0, 0), make_vec2(1, 1), make_SphericalCoord(0, 0), make_RGBcolor(0, 0, 0));
+        ctx.assignMaterialToPrimitive(p3, "fallback_mat");
+
+        // Test fallback - should throw error for non-existent data
+        int nonexistent_val;
+        DOCTEST_CHECK_THROWS(ctx.getDataWithMaterialFallback(p3, "nonexistent", nonexistent_val));
+    }
+
+    SUBCASE("Material Data - XML Round-Trip with Labels") {
+        Context ctx;
+
+        // Create material with data
+        ctx.addMaterial("data_round_trip_mat");
+        ctx.setMaterialColor("data_round_trip_mat", make_RGBAcolor(0.5f, 0.25f, 0.75f, 1));
+        ctx.setMaterialData("data_round_trip_mat", "twosided_flag", 1u);
+        ctx.setMaterialData("data_round_trip_mat", "reflectance", 0.8f);
+        ctx.setMaterialData("data_round_trip_mat", "normal", make_vec3(0, 0, 1));
+
+        // Create primitives with this material
+        uint p1 = ctx.addPatch(make_vec3(0, 0, 0), make_vec2(1, 1), make_SphericalCoord(0, 0), make_RGBcolor(0, 0, 0));
+        uint p2 = ctx.addPatch(make_vec3(1, 0, 0), make_vec2(1, 1), make_SphericalCoord(0, 0), make_RGBcolor(0, 0, 0));
+        ctx.assignMaterialToPrimitive(p1, "data_round_trip_mat");
+        ctx.assignMaterialToPrimitive(p2, "data_round_trip_mat");
+
+        // Write to XML
+        ctx.writeXML("test_material_data.xml", true);
+
+        // Load into new context
+        Context ctx2;
+        ctx2.loadXML("test_material_data.xml", true);
+
+        // Verify material and data were preserved
+        DOCTEST_CHECK(ctx2.doesMaterialExist("data_round_trip_mat"));
+
+        DOCTEST_CHECK(ctx2.doesMaterialDataExist("data_round_trip_mat", "twosided_flag"));
+        uint flag_val;
+        ctx2.getMaterialData("data_round_trip_mat", "twosided_flag", flag_val);
+        DOCTEST_CHECK(flag_val == 1u);
+
+        DOCTEST_CHECK(ctx2.doesMaterialDataExist("data_round_trip_mat", "reflectance"));
+        float refl_val;
+        ctx2.getMaterialData("data_round_trip_mat", "reflectance", refl_val);
+        DOCTEST_CHECK(refl_val == doctest::Approx(0.8f).epsilon(0.001));
+
+        DOCTEST_CHECK(ctx2.doesMaterialDataExist("data_round_trip_mat", "normal"));
+        vec3 norm_val;
+        ctx2.getMaterialData("data_round_trip_mat", "normal", norm_val);
+        DOCTEST_CHECK(norm_val.x == doctest::Approx(0.0f).epsilon(0.001));
+        DOCTEST_CHECK(norm_val.y == doctest::Approx(0.0f).epsilon(0.001));
+        DOCTEST_CHECK(norm_val.z == doctest::Approx(1.0f).epsilon(0.001));
+
+        // Clean up
+        std::filesystem::remove("test_material_data.xml");
+    }
+
+    SUBCASE("Material Methods - getPrimitiveMaterialID and getMaterial") {
+        Context ctx;
+
+        // Create materials
+        ctx.addMaterial("test_mat_1");
+        ctx.setMaterialColor("test_mat_1", make_RGBAcolor(1, 0, 0, 1));
+        uint mat1_id = ctx.getMaterialIDFromLabel("test_mat_1");
+
+        ctx.addMaterial("test_mat_2");
+        ctx.setMaterialColor("test_mat_2", make_RGBAcolor(0, 1, 0, 1));
+        uint mat2_id = ctx.getMaterialIDFromLabel("test_mat_2");
+
+        // Create primitives and assign materials
+        uint p1 = ctx.addPatch(make_vec3(0, 0, 0), make_vec2(1, 1));
+        uint p2 = ctx.addPatch(make_vec3(1, 0, 0), make_vec2(1, 1));
+        uint p3 = ctx.addPatch(make_vec3(2, 0, 0), make_vec2(1, 1));
+
+        ctx.assignMaterialToPrimitive(p1, "test_mat_1");
+        ctx.assignMaterialToPrimitive(p2, "test_mat_2");
+        ctx.assignMaterialToPrimitive(p3, "test_mat_1");
+
+        // Test getPrimitiveMaterialID
+        DOCTEST_CHECK(ctx.getPrimitiveMaterialID(p1) == mat1_id);
+        DOCTEST_CHECK(ctx.getPrimitiveMaterialID(p2) == mat2_id);
+        DOCTEST_CHECK(ctx.getPrimitiveMaterialID(p3) == mat1_id);
+
+        // Test getMaterial
+        const Material &mat1 = ctx.getMaterial(mat1_id);
+        DOCTEST_CHECK(mat1.label == "test_mat_1");
+        DOCTEST_CHECK(mat1.color.r == doctest::Approx(1.0f));
+        DOCTEST_CHECK(mat1.color.g == doctest::Approx(0.0f));
+        DOCTEST_CHECK(mat1.color.b == doctest::Approx(0.0f));
+
+        const Material &mat2 = ctx.getMaterial(mat2_id);
+        DOCTEST_CHECK(mat2.label == "test_mat_2");
+        DOCTEST_CHECK(mat2.color.r == doctest::Approx(0.0f));
+        DOCTEST_CHECK(mat2.color.g == doctest::Approx(1.0f));
+        DOCTEST_CHECK(mat2.color.b == doctest::Approx(0.0f));
+
+        // Test getMaterial with invalid ID throws error
+        DOCTEST_CHECK_THROWS((void) ctx.getMaterial(99999));
+    }
+
+    SUBCASE("Material Methods - getMaterialIDFromLabel") {
+        Context ctx;
+
+        // Create several materials
+        ctx.addMaterial("material_a");
+        ctx.addMaterial("material_b");
+        ctx.addMaterial("material_c");
+
+        // Test getting IDs from labels
+        uint id_a = ctx.getMaterialIDFromLabel("material_a");
+        uint id_b = ctx.getMaterialIDFromLabel("material_b");
+        uint id_c = ctx.getMaterialIDFromLabel("material_c");
+
+        // IDs should be unique
+        DOCTEST_CHECK(id_a != id_b);
+        DOCTEST_CHECK(id_b != id_c);
+        DOCTEST_CHECK(id_a != id_c);
+
+        // Getting same label should return same ID
+        DOCTEST_CHECK(ctx.getMaterialIDFromLabel("material_a") == id_a);
+        DOCTEST_CHECK(ctx.getMaterialIDFromLabel("material_b") == id_b);
+
+        // Non-existent label should throw error
+        DOCTEST_CHECK_THROWS((void) ctx.getMaterialIDFromLabel("nonexistent_material"));
+    }
+
+    SUBCASE("Material copy-on-write - basic color modification") {
+        Context context;
+
+        // Create two primitives with same color (shared material via deduplication)
+        uint uuid1 = context.addPatch(make_vec3(0, 0, 0), make_vec2(1, 1), make_SphericalCoord(0, 0), RGB::red);
+        uint uuid2 = context.addPatch(make_vec3(2, 0, 0), make_vec2(1, 1), make_SphericalCoord(0, 0), RGB::red);
+
+        // Verify they share material initially
+        std::string mat1_before = context.getPrimitiveMaterialLabel(uuid1);
+        std::string mat2_before = context.getPrimitiveMaterialLabel(uuid2);
+        DOCTEST_CHECK(mat1_before == mat2_before);
+
+        // Modify one primitive's color
+        context.setPrimitiveColor(uuid1, RGB::blue);
+
+        // Verify materials are now different (copy-on-write occurred)
+        std::string mat1_after = context.getPrimitiveMaterialLabel(uuid1);
+        std::string mat2_after = context.getPrimitiveMaterialLabel(uuid2);
+        DOCTEST_CHECK(mat1_after != mat2_after);
+
+        // Verify colors are independent
+        RGBcolor color1 = context.getPrimitiveColor(uuid1);
+        RGBcolor color2 = context.getPrimitiveColor(uuid2);
+        DOCTEST_CHECK(color1 == RGB::blue);
+        DOCTEST_CHECK(color2 == RGB::red);
+    }
+
+    SUBCASE("Material copy-on-write - object-level modification") {
+        Context context;
+
+        // Create two sphere objects with same color
+        uint obj1 = context.addSphereObject(10, make_vec3(0, 0, 0), 1.f, RGB::green);
+        uint obj2 = context.addSphereObject(10, make_vec3(3, 0, 0), 1.f, RGB::green);
+
+        // Modify one object's color
+        context.setObjectColor(obj1, RGB::yellow);
+
+        // Verify objects have different colors
+        auto prims1 = context.getObjectPrimitiveUUIDs(obj1);
+        auto prims2 = context.getObjectPrimitiveUUIDs(obj2);
+
+        RGBcolor color1 = context.getPrimitiveColor(prims1[0]);
+        RGBcolor color2 = context.getPrimitiveColor(prims2[0]);
+
+        DOCTEST_CHECK(color1 == RGB::yellow);
+        DOCTEST_CHECK(color2 == RGB::green);
+    }
+
+    SUBCASE("Material copy-on-write - non-shared optimization") {
+        Context context;
+
+        // Create single primitive with explicit color
+        uint uuid = context.addPatch(make_vec3(0, 0, 0), make_vec2(1, 1), make_SphericalCoord(0, 0), RGB::cyan);
+
+        std::string mat1 = context.getPrimitiveMaterialLabel(uuid);
+
+        // Modify color - should NOT create new material since it's not shared
+        context.setPrimitiveColor(uuid, RGB::magenta);
+
+        std::string mat2 = context.getPrimitiveMaterialLabel(uuid);
+
+        // Material should be same (no copy needed, just modified in place)
+        DOCTEST_CHECK(mat1 == mat2);
+    }
+}
+
+TEST_CASE("Context Timeseries File Loading") {
+
+    SUBCASE("ISO-8601 UTC datetime") {
+        Context ctx;
+        std::string warning_msg;
+        {
+            capture_cerr capture;
+            ctx.loadTabularTimeseriesData("lib/testdata/timeseries_iso8601_utc.csv", {}, ",", "ISO8601", 0);
+            warning_msg = capture.get_captured_output();
+        }
+        DOCTEST_CHECK(warning_msg.find("headerlines argument was specified as zero") != std::string::npos);
+
+        Date date = make_Date(3, 2, 2026);
+        float temp = ctx.queryTimeseriesData("temperature", date, make_Time(10, 0, 0));
+        DOCTEST_CHECK(temp == doctest::Approx(15.5f));
+
+        float temp2 = ctx.queryTimeseriesData("temperature", date, make_Time(12, 0, 0));
+        DOCTEST_CHECK(temp2 == doctest::Approx(17.8f));
+
+        float humid = ctx.queryTimeseriesData("humidity", date, make_Time(10, 0, 0));
+        DOCTEST_CHECK(humid == doctest::Approx(0.65f));
+
+        // UTC offset should be set to 0 (ISO offset Z → Helios 0)
+        Location loc = ctx.getLocation();
+        DOCTEST_CHECK(loc.UTC_offset == doctest::Approx(0.0f));
+    }
+
+    SUBCASE("ISO-8601 with timezone offset") {
+        Context ctx;
+        std::string warning_msg;
+        {
+            capture_cerr capture;
+            ctx.loadTabularTimeseriesData("lib/testdata/timeseries_iso8601_offset.csv", {}, ",", "ISO8601", 0);
+            warning_msg = capture.get_captured_output();
+        }
+        DOCTEST_CHECK(warning_msg.find("headerlines argument was specified as zero") != std::string::npos);
+
+        Date date = make_Date(3, 2, 2026);
+        // The local time is used (02:00, 03:00, 04:00)
+        float temp = ctx.queryTimeseriesData("temperature", date, make_Time(2, 0, 0));
+        DOCTEST_CHECK(temp == doctest::Approx(15.5f));
+
+        float temp2 = ctx.queryTimeseriesData("temperature", date, make_Time(4, 0, 0));
+        DOCTEST_CHECK(temp2 == doctest::Approx(17.8f));
+
+        // ISO -08:00 → Helios UTC_offset = +8 (West-positive convention)
+        Location loc = ctx.getLocation();
+        DOCTEST_CHECK(loc.UTC_offset == doctest::Approx(8.0f));
+    }
+
+    SUBCASE("Compact date (YYYYMMDD no delimiters)") {
+        Context ctx;
+        std::string warning_msg;
+        {
+            capture_cerr capture;
+            ctx.loadTabularTimeseriesData("lib/testdata/timeseries_compact_date.csv", {}, ",", "YYYYMMDD", 0);
+            warning_msg = capture.get_captured_output();
+        }
+        DOCTEST_CHECK(warning_msg.find("headerlines argument was specified as zero") != std::string::npos);
+
+        Date date = make_Date(3, 2, 2026);
+        float temp = ctx.queryTimeseriesData("temperature", date, make_Time(10, 0, 0));
+        DOCTEST_CHECK(temp == doctest::Approx(15.5f));
+
+        float temp2 = ctx.queryTimeseriesData("temperature", date, make_Time(12, 0, 0));
+        DOCTEST_CHECK(temp2 == doctest::Approx(17.8f));
+    }
+
+    SUBCASE("Compact datetime (YYYYMMDDHH)") {
+        Context ctx;
+        std::string warning_msg;
+        {
+            capture_cerr capture;
+            ctx.loadTabularTimeseriesData("lib/testdata/timeseries_compact_datetime.csv", {}, ",", "YYYYMMDDHH", 0);
+            warning_msg = capture.get_captured_output();
+        }
+        DOCTEST_CHECK(warning_msg.find("headerlines argument was specified as zero") != std::string::npos);
+
+        Date date = make_Date(3, 2, 2026);
+        float temp = ctx.queryTimeseriesData("temperature", date, make_Time(10, 0, 0));
+        DOCTEST_CHECK(temp == doctest::Approx(15.5f));
+
+        float temp2 = ctx.queryTimeseriesData("temperature", date, make_Time(12, 0, 0));
+        DOCTEST_CHECK(temp2 == doctest::Approx(17.8f));
+    }
+
+    SUBCASE("Time column (HH:MM and HH:MM:SS)") {
+        Context ctx;
+        std::string warning_msg;
+        {
+            capture_cerr capture;
+            ctx.loadTabularTimeseriesData("lib/testdata/timeseries_time_column.csv", {}, ",", "YYYYMMDD", 0);
+            warning_msg = capture.get_captured_output();
+        }
+        DOCTEST_CHECK(warning_msg.find("headerlines argument was specified as zero") != std::string::npos);
+
+        Date date = make_Date(3, 2, 2026);
+        float temp = ctx.queryTimeseriesData("temperature", date, make_Time(10, 30, 0));
+        DOCTEST_CHECK(temp == doctest::Approx(15.5f));
+
+        // HH:MM:SS format: 11:15:30
+        float temp2 = ctx.queryTimeseriesData("temperature", date, make_Time(11, 15, 30));
+        DOCTEST_CHECK(temp2 == doctest::Approx(16.2f));
+
+        float temp3 = ctx.queryTimeseriesData("temperature", date, make_Time(12, 0, 0));
+        DOCTEST_CHECK(temp3 == doctest::Approx(17.8f));
+    }
+
+    SUBCASE("Datetime with space separator") {
+        Context ctx;
+        std::string warning_msg;
+        {
+            capture_cerr capture;
+            ctx.loadTabularTimeseriesData("lib/testdata/timeseries_datetime_space.csv", {}, " ", "YYYY-MM-DD HH:MM", 0);
+            warning_msg = capture.get_captured_output();
+        }
+        DOCTEST_CHECK(warning_msg.find("headerlines argument was specified as zero") != std::string::npos);
+
+        Date date = make_Date(3, 2, 2026);
+        float temp = ctx.queryTimeseriesData("temperature", date, make_Time(10, 0, 0));
+        DOCTEST_CHECK(temp == doctest::Approx(15.5f));
+
+        float temp2 = ctx.queryTimeseriesData("temperature", date, make_Time(12, 0, 0));
+        DOCTEST_CHECK(temp2 == doctest::Approx(17.8f));
+    }
+
+    SUBCASE("European DD/MM/YYYY HH:MM datetime") {
+        Context ctx;
+        std::string warning_msg;
+        {
+            capture_cerr capture;
+            ctx.loadTabularTimeseriesData("lib/testdata/timeseries_ddmmyyyy_hhmm.csv", {}, ",", "DD/MM/YYYY HH:MM", 0);
+            warning_msg = capture.get_captured_output();
+        }
+        DOCTEST_CHECK(warning_msg.find("headerlines argument was specified as zero") != std::string::npos);
+
+        Date date = make_Date(3, 2, 2026); // 03/02/2026 = Feb 3rd in DD/MM/YYYY
+        float temp = ctx.queryTimeseriesData("temperature", date, make_Time(10, 0, 0));
+        DOCTEST_CHECK(temp == doctest::Approx(15.5f));
+
+        float temp2 = ctx.queryTimeseriesData("temperature", date, make_Time(12, 0, 0));
+        DOCTEST_CHECK(temp2 == doctest::Approx(17.8f));
+    }
+
+    SUBCASE("US MM/DD/YYYY HH:MM datetime") {
+        Context ctx;
+        std::string warning_msg;
+        {
+            capture_cerr capture;
+            ctx.loadTabularTimeseriesData("lib/testdata/timeseries_mmddyyyy_hhmm.csv", {}, ",", "MM/DD/YYYY HH:MM", 0);
+            warning_msg = capture.get_captured_output();
+        }
+        DOCTEST_CHECK(warning_msg.find("headerlines argument was specified as zero") != std::string::npos);
+
+        Date date = make_Date(3, 2, 2026); // 02/03/2026 = Feb 3rd in MM/DD/YYYY
+        float temp = ctx.queryTimeseriesData("temperature", date, make_Time(10, 0, 0));
+        DOCTEST_CHECK(temp == doctest::Approx(15.5f));
+
+        float temp2 = ctx.queryTimeseriesData("temperature", date, make_Time(12, 0, 0));
+        DOCTEST_CHECK(temp2 == doctest::Approx(17.8f));
+    }
+
+    SUBCASE("Backward compatibility - existing weather_data.csv") {
+        Context ctx;
+        // weather_data.csv has: date "1-2-2020" with DDMMYYYY = day 1, month 2 = Feb 1
+        std::string warning_msg;
+        {
+            capture_cerr capture;
+            ctx.loadTabularTimeseriesData("lib/testdata/weather_data.csv", {}, ",", "DDMMYYYY", 0);
+            warning_msg = capture.get_captured_output();
+        }
+        DOCTEST_CHECK(warning_msg.find("headerlines argument was specified as zero") != std::string::npos);
+
+        Date date = make_Date(1, 2, 2020);
+        float temp = ctx.queryTimeseriesData("temperature", date, make_Time(13, 0, 0));
+        DOCTEST_CHECK(temp == doctest::Approx(35.32343f));
+
+        float temp2 = ctx.queryTimeseriesData("temperature", date, make_Time(14, 0, 0));
+        DOCTEST_CHECK(temp2 == doctest::Approx(36.23432f));
+    }
+
+    SUBCASE("User-specified column labels") {
+        Context ctx;
+        ctx.loadTabularTimeseriesData("lib/testdata/timeseries_iso8601_utc.csv",
+                                      {"datetime", "temp", "rh"}, ",", "ISO8601", 1);
+
+        Date date = make_Date(3, 2, 2026);
+        float temp = ctx.queryTimeseriesData("temp", date, make_Time(10, 0, 0));
+        DOCTEST_CHECK(temp == doctest::Approx(15.5f));
+
+        float rh = ctx.queryTimeseriesData("rh", date, make_Time(10, 0, 0));
+        DOCTEST_CHECK(rh == doctest::Approx(0.65f));
+    }
+
+    SUBCASE("Real data: Open-Meteo Davis CA (ISO-8601 no seconds)") {
+        // Real Open-Meteo data for Davis, CA. File has 3 metadata header lines + 1 blank line.
+        // Datetime format is ISO-8601 without seconds: "2024-01-01T00:00"
+        // Column header says "time" but it's a full datetime — user must remap with labels.
+        Context ctx;
+        ctx.loadTabularTimeseriesData("lib/testdata/timeseries_openmeteo_davis.csv",
+                                      {"datetime", "temperature", "humidity", "precipitation"},
+                                      ",", "ISO8601", 4);
+
+        Date jan1 = make_Date(1, 1, 2024);
+        Date jan2 = make_Date(2, 1, 2024);
+
+        // First row: 2024-01-01T00:00, 9.1, 96, 0.00
+        float temp_midnight = ctx.queryTimeseriesData("temperature", jan1, make_Time(0, 0, 0));
+        DOCTEST_CHECK(temp_midnight == doctest::Approx(9.1f));
+
+        // Row: 2024-01-01T12:00, 14.1, 66, 0.00
+        float temp_noon = ctx.queryTimeseriesData("temperature", jan1, make_Time(12, 0, 0));
+        DOCTEST_CHECK(temp_noon == doctest::Approx(14.1f));
+
+        float humid_noon = ctx.queryTimeseriesData("humidity", jan1, make_Time(12, 0, 0));
+        DOCTEST_CHECK(humid_noon == doctest::Approx(66.0f));
+
+        // Row: 2024-01-02T18:00, 11.1, 91, 1.20
+        float precip = ctx.queryTimeseriesData("precipitation", jan2, make_Time(18, 0, 0));
+        DOCTEST_CHECK(precip == doctest::Approx(1.20f));
+    }
+
+    SUBCASE("Real data: Open-Meteo NYC (ISO-8601 negative temperatures)") {
+        // Real Open-Meteo data for New York City. Tests negative values and ISO-8601 no-seconds.
+        Context ctx;
+        ctx.loadTabularTimeseriesData("lib/testdata/timeseries_openmeteo_nyc.csv",
+                                      {"datetime", "temperature", "precipitation"},
+                                      ",", "ISO8601", 4);
+
+        Date jan1 = make_Date(1, 1, 2024);
+        Date jan2 = make_Date(2, 1, 2024);
+        Date jan3 = make_Date(3, 1, 2024);
+
+        // Row: 2024-01-01T00:00, 1.8, 0.00
+        float temp = ctx.queryTimeseriesData("temperature", jan1, make_Time(0, 0, 0));
+        DOCTEST_CHECK(temp == doctest::Approx(1.8f));
+
+        // Row: 2024-01-02T07:00, -4.6, 0.00 (negative temperature)
+        float temp_cold = ctx.queryTimeseriesData("temperature", jan2, make_Time(7, 0, 0));
+        DOCTEST_CHECK(temp_cold == doctest::Approx(-4.6f));
+
+        // Row: 2024-01-02T00:00, -1.1, 0.00
+        float temp_neg = ctx.queryTimeseriesData("temperature", jan2, make_Time(0, 0, 0));
+        DOCTEST_CHECK(temp_neg == doctest::Approx(-1.1f));
+
+        // Row: 2024-01-03T13:00, 7.7, 0.00
+        float temp_warm = ctx.queryTimeseriesData("temperature", jan3, make_Time(13, 0, 0));
+        DOCTEST_CHECK(temp_warm == doctest::Approx(7.7f));
     }
 }

@@ -1,6 +1,6 @@
 /** \file "VisualizerContext.cpp" Visualizer Context geometry handling functions.
 
-    Copyright (C) 2016-2025 Brian Bailey
+    Copyright (C) 2016-2026 Brian Bailey
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -34,6 +34,12 @@ void Visualizer::buildContextGeometry(helios::Context *context_ptr) {
     // Asset directory registration removed - now using HELIOS_BUILD resolution
 
     build_all_context_geometry = true;
+
+    // Restore navigation gizmo if it was enabled before displaying an image
+    if (navigation_gizmo_was_enabled_before_image_display) {
+        this->showNavigationGizmo();
+        navigation_gizmo_was_enabled_before_image_display = false; // Reset the flag
+    }
 }
 
 void Visualizer::buildContextGeometry(helios::Context *context_ptr, const std::vector<uint> &UUIDs) {
@@ -48,6 +54,12 @@ void Visualizer::buildContextGeometry(helios::Context *context_ptr, const std::v
 
     build_all_context_geometry = false;
     contextUUIDs_build = UUIDs;
+
+    // Restore navigation gizmo if it was enabled before displaying an image
+    if (navigation_gizmo_was_enabled_before_image_display) {
+        this->showNavigationGizmo();
+        navigation_gizmo_was_enabled_before_image_display = false; // Reset the flag
+    }
 }
 
 void Visualizer::buildContextGeometry_private() {
@@ -112,22 +124,17 @@ void Visualizer::buildContextGeometry_private() {
             }
         }
     } else if (!colorPrimitivesByObjectData.empty()) {
-        if (colorPrimitives_objIDs.empty()) { // load all primitives
-            std::vector<uint> ObjIDs = context->getAllObjectIDs();
-            for (uint objID: ObjIDs) {
-                if (context->doesObjectExist(objID)) {
-                    std::vector<uint> UUIDs = context->getObjectPointer(objID)->getPrimitiveUUIDs();
-                    for (uint UUID: UUIDs) {
-                        if (context->doesPrimitiveExist(UUID)) {
-                            colorPrimitives_UUIDs[UUID] = UUID;
-                        }
-                    }
+        if (colorPrimitives_objIDs.empty()) { // load all primitives, including orphans (no parent object) which are assigned a default object-data value of 0
+            std::vector<uint> all_UUIDs = context->getAllUUIDs();
+            for (uint UUID: all_UUIDs) {
+                if (context->doesPrimitiveExist(UUID)) {
+                    colorPrimitives_UUIDs[UUID] = UUID;
                 }
             }
         } else { // load primitives specified by user
             for (const auto &objID: colorPrimitives_objIDs) {
                 if (context->doesObjectExist(objID.first)) {
-                    std::vector<uint> UUIDs = context->getObjectPointer(objID.first)->getPrimitiveUUIDs();
+                    std::vector<uint> UUIDs = context->getObjectPrimitiveUUIDs(objID.first);
                     for (uint UUID: UUIDs) {
                         if (context->doesPrimitiveExist(UUID)) {
                             colorPrimitives_UUIDs[UUID] = UUID;

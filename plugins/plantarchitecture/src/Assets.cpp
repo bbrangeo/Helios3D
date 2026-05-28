@@ -1,6 +1,6 @@
 /** \file "Assets.cpp" Function definitions for plant organ prototypes plant architecture plug-in.
 
-    Copyright (C) 2016-2025 Brian Bailey
+    Copyright (C) 2016-2026 Brian Bailey
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -22,14 +22,9 @@ uint GenericLeafPrototype(helios::Context *context_ptr, LeafPrototype *prototype
 
     // If OBJ model file is specified, load it and return the object ID
     if (!prototype_parameters->OBJ_model_file.empty()) {
-        // Use unified file resolution to validate OBJ file existence
-        try {
-            std::filesystem::path resolved_path = helios::resolveFilePath(prototype_parameters->OBJ_model_file);
-            (void) resolved_path; // Suppress unused variable warning
-        } catch (const std::runtime_error &) {
-            helios_runtime_error("ERROR (PlantArchitecture): Leaf prototype OBJ file " + prototype_parameters->OBJ_model_file + " does not exist.");
-        }
-        return context_ptr->addPolymeshObject(context_ptr->loadOBJ(prototype_parameters->OBJ_model_file.c_str(), prototype_parameters->leaf_offset, 0, nullrotation, RGB::black, "ZUP", true));
+        // Resolve OBJ file path (allows users to specify simple paths like "MyLeaf.obj")
+        std::string resolved_obj = PlantArchitecture::resolveTextureFile(prototype_parameters->OBJ_model_file);
+        return context_ptr->addPolymeshObject(context_ptr->loadOBJ(resolved_obj.c_str(), prototype_parameters->leaf_offset, 0, nullrotation, RGB::black, "ZUP", true));
     }
 
     std::string leaf_texture;
@@ -42,6 +37,9 @@ uint GenericLeafPrototype(helios::Context *context_ptr, LeafPrototype *prototype
     } else {
         leaf_texture = prototype_parameters->leaf_texture_file[compound_leaf_index];
     }
+
+    // Resolve leaf texture path (allows users to specify simple paths like "AlmondLeaf.png")
+    leaf_texture = PlantArchitecture::resolveTextureFile(leaf_texture);
 
     // -- main leaf generation code -- //
 
@@ -84,26 +82,43 @@ uint GenericLeafPrototype(helios::Context *context_ptr, LeafPrototype *prototype
                             0.01 * prototype_parameters->petiole_roll.val() / fabs(prototype_parameters->petiole_roll.val());
             }
 
-            // vertical displacement for leaf wave at each of the four subdivision vertices
+            // vertical displacement for leaf wave at each of the four subdivision vertices.
+            // The wave is applied along the local surface normal *after* the longitudinal
+            // curvature and buckle rotations, so the bumps don't get tilted into the leaf
+            // tangent direction (which would visually flatten the wave past the buckle).
             float z_wave = 0;
             if (prototype_parameters->wave_period.val() > 0.0f && prototype_parameters->wave_amplitude.val() > 0.0f) {
-                z_wave = (2.f * fabs(y) * prototype_parameters->wave_amplitude.val() * sinf((x + 0.5f * float(j >= 0.5 * Ny)) * M_PI / prototype_parameters->wave_period.val()));
+                const float wave_phase = (x + prototype_parameters->wave_period.val() * float(j >= 0.5 * Ny)) * M_PI / prototype_parameters->wave_period.val();
+                z_wave = 2.f * fabs(y) * prototype_parameters->wave_amplitude.val() * sinf(wave_phase);
             }
 
-            vertices.at(j).at(i) = make_vec3(x, y_fold, z_fold + z_ycurve + z_wave + z_petiole);
+            vertices.at(j).at(i) = make_vec3(x, y_fold, z_fold + z_ycurve + z_petiole);
+
+            float rot_angle = 0.f;
 
             if (prototype_parameters->longitudinal_curvature.val() != 0.0f && i > 0) {
                 dtheta -= atan(4.f * prototype_parameters->longitudinal_curvature.val() * powf(x, 3) * dx);
                 vertices.at(j).at(i) = rotatePointAboutLine(vertices.at(j).at(i), nullorigin, make_vec3(0, 1, 0), dtheta);
+                rot_angle += dtheta;
             }
 
             if (prototype_parameters->leaf_buckle_angle.val() > 0) {
                 const float xf = prototype_parameters->leaf_buckle_length.val();
                 if (x <= prototype_parameters->leaf_buckle_length.val() && x + dx > prototype_parameters->leaf_buckle_length.val()) {
-                    vertices.at(j).at(i) = rotatePointAboutLine(vertices.at(j).at(i), make_vec3(xf, 0, 0), make_vec3(0, 1, 0), 0.5f * deg2rad(prototype_parameters->leaf_buckle_angle.val()));
+                    const float ang = 0.5f * deg2rad(prototype_parameters->leaf_buckle_angle.val());
+                    vertices.at(j).at(i) = rotatePointAboutLine(vertices.at(j).at(i), make_vec3(xf, 0, 0), make_vec3(0, 1, 0), ang);
+                    rot_angle += ang;
                 } else if (x + dx > prototype_parameters->leaf_buckle_length.val()) {
-                    vertices.at(j).at(i) = rotatePointAboutLine(vertices.at(j).at(i), make_vec3(xf, 0, 0), make_vec3(0, 1, 0), deg2rad(prototype_parameters->leaf_buckle_angle.val()));
+                    const float ang = deg2rad(prototype_parameters->leaf_buckle_angle.val());
+                    vertices.at(j).at(i) = rotatePointAboutLine(vertices.at(j).at(i), make_vec3(xf, 0, 0), make_vec3(0, 1, 0), ang);
+                    rot_angle += ang;
                 }
+            }
+
+            // apply wave displacement along the rotated leaf-surface normal
+            if (z_wave != 0.f) {
+                vertices.at(j).at(i).x += z_wave * sinf(rot_angle);
+                vertices.at(j).at(i).z += z_wave * cosf(rot_angle);
             }
         }
     }
@@ -429,7 +444,7 @@ void CowpeaPhytomerCreationFunction(std::shared_ptr<Phytomer> phytomer, uint sho
 
 // Function to generate random float between min and max
 float random_float(float min, float max) {
-    return min + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / (max - min)));
+    return min + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX) / (max - min));
 }
 
 // Function to check if two spheres overlap
@@ -818,6 +833,16 @@ void SorghumPhytomerCreationFunction(std::shared_ptr<Phytomer> phytomer, uint sh
 
     // set internode length based on position along the shoot
     phytomer->scaleInternodeMaxLength(scale);
+
+    // The terminal phytomer carries the panicle; its leaf is the flag leaf. The global
+    // rule sets the last-phytomer petiole to a small near-zero pitch (5°), which keeps
+    // the petiole axis well-defined but leaves the leaf almost parallel to the panicle.
+    // Add the rest of the tilt as a solid-body petiole rotation so the leaf comes along
+    // and clears the panicle.
+    const bool is_flag_leaf = (shoot_max_nodes > 0 && shoot_node_index + 1 == shoot_max_nodes);
+    if (is_flag_leaf) {
+        phytomer->rotatePetiole(0, make_AxisRotation(deg2rad(25.f), 0.f, 0.f));
+    }
 }
 
 uint SoybeanFruitPrototype(helios::Context *context_ptr, uint subdivisions) {

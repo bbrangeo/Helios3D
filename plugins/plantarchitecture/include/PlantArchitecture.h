@@ -1,6 +1,6 @@
 /** \file "PlantArchitecture.h" Primary header file for plant architecture plug-in.
 
-    Copyright (C) 2016-2025 Brian Bailey
+    Copyright (C) 2016-2026 Brian Bailey
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -216,11 +216,12 @@ public:
         return constval;
     }
 
+    std::string distribution;
+    std::vector<int> distribution_parameters;
+
 private:
     bool sampled;
     int constval;
-    std::string distribution;
-    std::vector<int> distribution_parameters;
     std::minstd_rand0 *generator;
 };
 
@@ -230,17 +231,23 @@ public:
         pitch = 0;
         yaw = 0;
         roll = 0;
+        azimuth = 0;
+        peduncle_axis = helios::make_vec3(0, 0, 1);
     }
 
     AxisRotation(float a_pitch, float a_yaw, float a_roll) {
         pitch = a_pitch;
         yaw = a_yaw;
         roll = a_roll;
+        azimuth = 0;
+        peduncle_axis = helios::make_vec3(0, 0, 1);
     }
 
     float pitch;
     float yaw;
     float roll;
+    float azimuth; // azimuth rotation for inflorescences (aligns to peduncle orientation)
+    helios::vec3 peduncle_axis; // direction vector of peduncle at attachment point (for compound yaw rotation)
 
     AxisRotation operator+(const AxisRotation &a) const;
     AxisRotation operator-(const AxisRotation &a) const;
@@ -268,15 +275,21 @@ struct CarbohydrateParameters {
 
     // -- Stem Growth Parameters -- //
     //! mature internode (wood/stem) density (g m^-3)
-    float stem_density = 540000;
+    float stem_density = 54000;
     //! fraction of the dry weight of internode made up by carbon in mature shoot
     float stem_carbon_percentage = 0.4559;
+    //! mean fraction of the dry weight of internode composed of carbohydrates in mature shoot
+    float carbohydrate_percentage = 0.10;
+    //! fraction of carbohydrates composed of carbon
+    float carbohydrate_carbon_percentage = 0.4;
+    //! fraction of the dry weight of internode made up by structural carbon in mature shoot - Excludes fraction made up by carbohydrates
+    float stem_structural_carbon_percentage = stem_carbon_percentage - (carbohydrate_carbon_percentage * carbohydrate_percentage);
     //! age at which stem reaches physiological maturity (days)
     float maturity_age = 180;
     //! starting fraction of the final stem carbon density in new growth
     float initial_density_ratio = 0.2;
     //! ratio of shoot internode dry weight to root dry weight
-    float shoot_root_ratio = 4.5;
+    float shoot_root_ratio = 3;
 
     // -- Leaf Growth Parameters -- //
     //! specific leaf area - ratio of leaf area to leaf dry mass (m^2 / g DW)
@@ -299,14 +312,18 @@ struct CarbohydrateParameters {
     float stem_maintenance_respiration_rate = 3.5024e-05;
     //! maintenance respiration rate of root (mol C respired/mol C in pool/day)
     float root_maintenance_respiration_rate = 3.5024e-05;
+    //! fraction of wood composed of physiologically active tissue
+    float living_wood_fraction = 0.5;
+    //! fraction of active respiration that occurs during dormancy
+    float dormant_respiration_fraction = 0.9;
     //! growth respiration cost (fraction of total carbon used during growth that goes toward respiration rather than structure)
     float growth_respiration_fraction = 0.28;
 
     // -- Organ Abortion Thresholds -- //
     //! carbohydrate concentration threshold to abort a flowering bud as a fraction of g C/ g DW in the stem
-    float carbohydrate_abortion_threshold = 0.1;
+    float carbohydrate_abortion_threshold = 0.15;
     //! carbohydrate concentration threshold to prune a shoot as a fraction of g C/ g DW in the stem
-    float carbohydrate_pruning_threshold = 0.01;
+    float carbohydrate_pruning_threshold = 0.025;
     //! threshold time (days) to abort a bud (bud is aborted when the carbohydrate concentration is below carbohydrate_abortion_threshold for more than this time)
     float bud_death_threshold_days = 2;
     //! threshold time (days) to abort a shoot (shoot is aborted when the carbohydrate concentration is below carbohydrate_abortion_threshold for more than this time)
@@ -319,13 +336,42 @@ struct CarbohydrateParameters {
     float carbohydrate_vegetative_break_threshold = 0.15;
 
     //! carbohydrate concentration threshold for radial growth as a fraction of g C/ g DW in the stem
-    float carbohydrate_growth_threshold = 0.1;
+    float carbohydrate_growth_threshold = 0.15;
 
     // -- Carbon Transfer Parameters -- //
     //! carbohydrate concentration threshold to transfer carbon to child shoots as a fraction of g C/ g DW in the stem
-    float carbohydrate_transfer_threshold = 0.05;
-    float carbon_conductance_down = 0.9; //<= 1.0
-    float carbon_conductance_up = carbon_conductance_down / 5; // Conductance of carbon from parent to child shoots << conductance from child to parent
+    float carbohydrate_transfer_threshold_down = 0.025;
+    float carbohydrate_transfer_threshold_up = 0.04;
+    float carbon_conductance_down = 0.75; //<= 1.0
+    float carbon_conductance_up = carbon_conductance_down; // Conductance of carbon from parent to child shoots << conductance from child to parent
+};
+
+//! Parameters for the nitrogen model
+struct NitrogenParameters {
+
+    // -- Leaf Nitrogen Content (Area Basis) -- //
+    //! target leaf nitrogen content per unit area (g N/m²)
+    float target_leaf_N_area = 1.5f;
+    //! minimum viable leaf nitrogen content per unit area (g N/m²)
+    float minimum_leaf_N_area = 0.5f;
+
+    // -- Allocation Parameters -- //
+    //! fraction of nitrogen uptake allocated to roots
+    float root_allocation_fraction = 0.15f;
+
+    // -- Rate Limiting Parameters -- //
+    //! maximum rate at which leaves can accumulate nitrogen per unit area (g N/m²/day)
+    float max_N_accumulation_rate = 0.1f;
+
+    // -- Remobilization Parameters -- //
+    //! fraction of leaf nitrogen that can be remobilized from old leaves (0.0-1.0)
+    float leaf_remobilization_efficiency = 0.70f;
+    //! fraction of leaf lifespan at which remobilization begins (0.0-1.0)
+    float remobilization_age_threshold = 0.70f;
+
+    // -- Fruit Nitrogen Parameters -- //
+    //! nitrogen content per unit fruit area (g N/m²)
+    float fruit_N_area = 1.0f;
 };
 
 //! Add geometry to the Context consisting of a series of Cone objects to form a tube-like shape
@@ -355,6 +401,8 @@ struct FloralBud {
     BudState state = BUD_DORMANT;
     // amount of time since the bud flowered (=0 if it has not yet flowered)
     float time_counter = 0;
+    // cumulative age since bud break (first transition out of dormant/active state)
+    float age = 0;
     //=0 for axillary buds, =1 for terminal buds
     bool isterminal = false;
     // For axillary buds: index of the petiole within the internode that this floral bud originates from
@@ -372,6 +420,8 @@ struct FloralBud {
     helios::vec3 bending_axis;
 
     std::vector<helios::vec3> inflorescence_bases;
+    std::vector<AxisRotation> inflorescence_rotation; // pitch, yaw, roll for each flower/fruit
+    std::vector<float> inflorescence_base_scales; // individual base scale for each flower/fruit (before growth scaling)
     std::vector<uint> peduncle_objIDs;
     std::vector<uint> inflorescence_objIDs;
 };
@@ -467,23 +517,32 @@ public:
             this->leaf_texture_file = a.leaf_texture_file;
             this->OBJ_model_file = a.OBJ_model_file;
             this->leaf_aspect_ratio = a.leaf_aspect_ratio;
-            this->leaf_aspect_ratio.resample();
+            if (a.leaf_aspect_ratio.distribution != "constant")
+                this->leaf_aspect_ratio.resample();
             this->midrib_fold_fraction = a.midrib_fold_fraction;
-            this->midrib_fold_fraction.resample();
+            if (a.midrib_fold_fraction.distribution != "constant")
+                this->midrib_fold_fraction.resample();
             this->longitudinal_curvature = a.longitudinal_curvature;
-            this->longitudinal_curvature.resample();
+            if (a.longitudinal_curvature.distribution != "constant")
+                this->longitudinal_curvature.resample();
             this->lateral_curvature = a.lateral_curvature;
-            this->lateral_curvature.resample();
+            if (a.lateral_curvature.distribution != "constant")
+                this->lateral_curvature.resample();
             this->petiole_roll = a.petiole_roll;
-            this->petiole_roll.resample();
+            if (a.petiole_roll.distribution != "constant")
+                this->petiole_roll.resample();
             this->wave_period = a.wave_period;
-            this->wave_period.resample();
+            if (a.wave_period.distribution != "constant")
+                this->wave_period.resample();
             this->wave_amplitude = a.wave_amplitude;
-            this->wave_amplitude.resample();
+            if (a.wave_amplitude.distribution != "constant")
+                this->wave_amplitude.resample();
             this->leaf_buckle_length = a.leaf_buckle_length;
-            this->leaf_buckle_length.resample();
+            if (a.leaf_buckle_length.distribution != "constant")
+                this->leaf_buckle_length.resample();
             this->leaf_buckle_angle = a.leaf_buckle_angle;
-            this->leaf_buckle_angle.resample();
+            if (a.leaf_buckle_angle.distribution != "constant")
+                this->leaf_buckle_angle.resample();
             this->leaf_offset = a.leaf_offset;
             this->subdivisions = a.subdivisions;
             this->unique_prototypes = a.unique_prototypes;
@@ -534,15 +593,20 @@ private:
         InternodeParameters &operator=(const InternodeParameters &a) {
             if (this != &a) {
                 this->pitch = a.pitch;
-                this->pitch.resample();
+                if (a.pitch.distribution != "constant")
+                    this->pitch.resample();
                 this->phyllotactic_angle = a.phyllotactic_angle;
-                this->phyllotactic_angle.resample();
+                if (a.phyllotactic_angle.distribution != "constant")
+                    this->phyllotactic_angle.resample();
                 this->radius_initial = a.radius_initial;
-                this->radius_initial.resample();
+                if (a.radius_initial.distribution != "constant")
+                    this->radius_initial.resample();
                 this->max_vegetative_buds_per_petiole = a.max_vegetative_buds_per_petiole;
-                this->max_vegetative_buds_per_petiole.resample();
+                if (a.max_vegetative_buds_per_petiole.distribution != "constant")
+                    this->max_vegetative_buds_per_petiole.resample();
                 this->max_floral_buds_per_petiole = a.max_floral_buds_per_petiole;
-                this->max_floral_buds_per_petiole.resample();
+                if (a.max_floral_buds_per_petiole.distribution != "constant")
+                    this->max_floral_buds_per_petiole.resample();
                 this->color = a.color;
                 this->image_texture = a.image_texture;
                 this->length_segments = a.length_segments;
@@ -558,9 +622,9 @@ private:
         uint petioles_per_internode;
         //! Angle in degrees of the petiole base axis relative to its parent phytomer axis
         RandomParameter_float pitch;
-        //! Radius in meters of the petiole cross-section; a value of 0 suppresses petiole creation
+        //! Radius in meters of the petiole cross-section; if either radius or length is 0, no petiole geometry is created and leaves attach at the internode tip
         RandomParameter_float radius;
-        //! Length in meters of the petiole tube; a value of 0 suppresses petiole creation
+        //! Length in meters of the petiole tube; if either radius or length is 0, no petiole geometry is created and leaves attach at the internode tip
         RandomParameter_float length;
         //! Curvature in degrees per meter applied along the petiole length (positive bends upward, negative downward)
         RandomParameter_float curvature;
@@ -577,15 +641,20 @@ private:
             if (this != &a) {
                 this->petioles_per_internode = a.petioles_per_internode;
                 this->pitch = a.pitch;
-                this->pitch.resample();
+                if (a.pitch.distribution != "constant")
+                    this->pitch.resample();
                 this->radius = a.radius;
-                this->radius.resample();
+                if (a.radius.distribution != "constant")
+                    this->radius.resample();
                 this->length = a.length;
-                this->length.resample();
+                if (a.length.distribution != "constant")
+                    this->length.resample();
                 this->curvature = a.curvature;
-                this->curvature.resample();
+                if (a.curvature.distribution != "constant")
+                    this->curvature.resample();
                 this->taper = a.taper;
-                this->taper.resample();
+                if (a.taper.distribution != "constant")
+                    this->taper.resample();
                 this->color = a.color;
                 this->length_segments = a.length_segments;
                 this->radial_subdivisions = a.radial_subdivisions;
@@ -615,19 +684,26 @@ private:
         LeafParameters &operator=(const LeafParameters &a) {
             if (this != &a) {
                 this->leaves_per_petiole = a.leaves_per_petiole;
-                this->leaves_per_petiole.resample();
+                if (a.leaves_per_petiole.distribution != "constant")
+                    this->leaves_per_petiole.resample();
                 this->pitch = a.pitch;
-                this->pitch.resample();
+                if (a.pitch.distribution != "constant")
+                    this->pitch.resample();
                 this->yaw = a.yaw;
-                this->yaw.resample();
+                if (a.yaw.distribution != "constant")
+                    this->yaw.resample();
                 this->roll = a.roll;
-                this->roll.resample();
+                if (a.roll.distribution != "constant")
+                    this->roll.resample();
                 this->leaflet_offset = a.leaflet_offset;
-                this->leaflet_offset.resample();
+                if (a.leaflet_offset.distribution != "constant")
+                    this->leaflet_offset.resample();
                 this->leaflet_scale = a.leaflet_scale;
-                this->leaflet_scale.resample();
+                if (a.leaflet_scale.distribution != "constant")
+                    this->leaflet_scale.resample();
                 this->prototype_scale = a.prototype_scale;
-                this->prototype_scale.resample();
+                if (a.prototype_scale.distribution != "constant")
+                    this->prototype_scale.resample();
                 this->prototype.duplicate(a.prototype);
             }
             return *this;
@@ -655,15 +731,20 @@ private:
         PeduncleParameters &operator=(const PeduncleParameters &a) {
             if (this != &a) {
                 this->length = a.length;
-                this->length.resample();
+                if (a.length.distribution != "constant")
+                    this->length.resample();
                 this->radius = a.radius;
-                this->radius.resample();
+                if (a.radius.distribution != "constant")
+                    this->radius.resample();
                 this->pitch = a.pitch;
-                this->pitch.resample();
+                if (a.pitch.distribution != "constant")
+                    this->pitch.resample();
                 this->roll = a.roll;
-                this->roll.resample();
+                if (a.roll.distribution != "constant")
+                    this->roll.resample();
                 this->curvature = a.curvature;
-                this->curvature.resample();
+                if (a.curvature.distribution != "constant")
+                    this->curvature.resample();
                 this->color = a.color;
                 this->length_segments = a.length_segments;
                 this->radial_subdivisions = a.radial_subdivisions;
@@ -815,9 +896,9 @@ struct ShootParameters {
     RandomParameter_int max_nodes_per_season;
     //! Cross-sectional area of internode in cm² branch area per m² downstream leaf area; set 0 to disable girth scaling
     RandomParameter_float girth_area_factor;
-    //! Angle (deg) of the child shoot with respect to the parent shoot at the tip of the parent shoot
+    //! Angle (deg) at which child shoots emerge from this parent shoot at the tip of the parent shoot
     RandomParameter_float insertion_angle_tip;
-    //! Rate (deg/node) at which the child insertion angle increases moving down the parent shoot
+    //! Rate (deg/node) at which the child shoot insertion angle increases moving down this parent shoot
     RandomParameter_float insertion_angle_decay_rate;
     //! Maximum internode length (m) of a child shoot
     RandomParameter_float internode_length_max;
@@ -842,6 +923,9 @@ struct ShootParameters {
     RandomParameter_float elongation_rate_max;
     //! Minimum probability that a bud will break and form a new shoot
     RandomParameter_float vegetative_bud_break_probability_min;
+    //! Maximum probability that a bud will break and form a new shoot
+    RandomParameter_float vegetative_bud_break_probability_max;
+
     //! Decay rate (1/node) of the vegetative bud-break probability along the shoot; sign determines direction
     RandomParameter_float vegetative_bud_break_probability_decay_rate;
     //! FLAG: description not found in specification table – please advise
@@ -883,6 +967,8 @@ struct ShootParameters {
         this->girth_area_factor.resample();
         this->vegetative_bud_break_probability_min = a.vegetative_bud_break_probability_min;
         this->vegetative_bud_break_probability_min.resample();
+        this->vegetative_bud_break_probability_max = a.vegetative_bud_break_probability_max;
+        this->vegetative_bud_break_probability_max.resample();
         this->flower_bud_break_probability = a.flower_bud_break_probability;
         this->flower_bud_break_probability.resample();
         this->fruit_set_probability = a.fruit_set_probability;
@@ -1127,6 +1213,16 @@ public:
      */
     void scaleLeafPrototypeScale(float scale_factor);
 
+    //! Scale petiole geometry to match target length and radius
+    /**
+     * This function rescales an existing petiole's 3D geometry (vertices and radii) to match the specified target dimensions.
+     * Used during XML deserialization to restore actual petiole sizes that may differ from parameter-based values.
+     * \param petiole_index Index of the petiole to scale
+     * \param target_length Target total length of the petiole in meters
+     * \param target_base_radius Target radius at the petiole base in meters
+     */
+    void scalePetioleGeometry(uint petiole_index, float target_length, float target_base_radius);
+
     /**
      * \brief Sets the scaling fraction for the inflorescence of a floral bud.
      *
@@ -1156,6 +1252,24 @@ public:
      * \param[in] rotation AxisRotation object containing pitch, roll, and yaw values for the rotation
      */
     void rotateLeaf(uint petiole_index, uint leaf_index, const AxisRotation &rotation);
+
+    /**
+     * \brief Rotates a petiole and everything anchored to it (its leaves) about the petiole base.
+     *
+     * Performs a solid-body rotation: the petiole tube and all leaves attached to it rotate
+     * together so the leaves remain anchored at the petiole tip. The terminal floral bud and
+     * its peduncle/inflorescence are anchored to the internode (not the petiole) and are not
+     * affected.
+     *
+     * \param[in] petiole_index Index identifying the petiole within the phytomer
+     * \param[in] rotation AxisRotation. Pitch tilts the petiole further from the internode
+     *                     about the petiole's stored rotation axis at the petiole base; only
+     *                     the magnitude is used (matching the construction's convention of
+     *                     `abs(petiole_pitch)`). Yaw rotates the petiole around the internode
+     *                     axis (azimuth around the stem). Roll rolls the petiole around its
+     *                     own length axis.
+     */
+    void rotatePetiole(uint petiole_index, const AxisRotation &rotation);
 
     /**
      * \brief Sets the vegetative bud state for all axillary vegetative buds in the phytomer.
@@ -1295,12 +1409,20 @@ public:
     std::vector<std::vector<helios::vec3>> petiole_vertices; // first index is petiole within internode, second index is tube segment within petiole tube
     std::vector<std::vector<helios::vec3>> leaf_bases; // first index is petiole within internode, second index is leaf within petiole
     std::vector<std::vector<std::vector<helios::vec3>>> peduncle_vertices; // first index is petiole within internode, second index is floral bud within petiole, third index is tube segment within peduncle
+    std::vector<std::vector<std::vector<float>>> peduncle_radii; // first index is petiole within internode, second index is floral bud within petiole, third index is tube segment within peduncle
+    std::vector<std::vector<float>> peduncle_length; // actual sampled length for each peduncle - first index is petiole, second is bud
+    std::vector<std::vector<float>> peduncle_radius; // actual sampled radius for each peduncle - first index is petiole, second is bud
+    std::vector<std::vector<float>> peduncle_pitch; // actual sampled pitch for each peduncle - first index is petiole, second is bud
+    std::vector<std::vector<float>> peduncle_curvature; // actual sampled curvature for each peduncle - first index is petiole, second is bud
     float internode_pitch, internode_phyllotactic_angle;
 
     std::vector<std::vector<float>> petiole_radii; // first index is petiole within internode, second index is segment within petiole tube
     std::vector<float> petiole_length; // index is petiole within internode
     std::vector<float> petiole_pitch; // index is petiole within internode
     std::vector<float> petiole_curvature; // index is petiole within internode
+    std::vector<float> petiole_taper; // taper value for each petiole (tip_radius/base_radius ratio)
+    std::vector<helios::vec3> petiole_axis_initial; // initial petiole axis (before curvature) for each petiole
+    std::vector<helios::vec3> petiole_rotation_axis; // rotation axis for curvature application for each petiole
     std::vector<std::vector<float>> leaf_size_max; // first index is petiole within internode, second index is leaf within petiole
     std::vector<std::vector<AxisRotation>> leaf_rotation; // first index is petiole within internode, second index is leaf within petiole
 
@@ -1338,6 +1460,9 @@ public:
     float internode_radius_max;
     float internode_length_max;
 
+    std::vector<float> internode_curvature_perturbations; //!< Stochastic curvature perturbation values for each internode segment (for exact XML reconstruction)
+    std::vector<float> internode_yaw_perturbations; //!< Stochastic yaw perturbation values for each internode segment (for exact XML reconstruction)
+
     bool build_context_geometry_petiole = true;
     bool build_context_geometry_peduncle = true;
 
@@ -1349,6 +1474,24 @@ protected:
     PlantArchitecture *plantarchitecture_ptr;
 
     void updateInflorescence(FloralBud &fbud);
+
+    /**
+     * \brief Create and position a single flower or fruit with specified rotation parameters.
+     *
+     * This function creates flower/fruit geometry and applies transformations. It is called by updateInflorescence()
+     * during normal growth with randomly sampled parameters, and by XML restoration with saved deterministic parameters.
+     *
+     * \param[in,out] fbud FloralBud to add the flower/fruit to
+     * \param[in] fruit_base Position on peduncle where flower/fruit attaches
+     * \param[in] peduncle_axis Direction vector of peduncle at attachment point
+     * \param[in] pitch Pitch rotation angle (radians) - rotates about Y-axis
+     * \param[in] roll Roll rotation angle (radians) - rotates about X-axis
+     * \param[in] azimuth Azimuth rotation angle (radians) - rotates about Z-axis to align with peduncle
+     * \param[in] yaw_compound Compound yaw rotation angle (radians) - rotates about peduncle axis
+     * \param[in] scale_factor Scale factor to apply to the flower/fruit prototype
+     * \param[in] is_open_flower For flowers: true=open, false=closed. Ignored for fruit.
+     */
+    void createInflorescenceGeometry(FloralBud &fbud, const helios::vec3 &fruit_base, const helios::vec3 &peduncle_axis, float pitch, float roll, float azimuth, float yaw_compound, float scale_factor, bool is_open_flower);
 
     /**
      * Calculate the total carbon cost (mol C) required for the construction of a phytomer's total leaf area.
@@ -1517,6 +1660,10 @@ struct Shoot {
     const uint parent_petiole_index;
 
     float carbohydrate_pool_molC = 0; // mol C
+
+    //! Per-leaf nitrogen tracking - maps leaf objID to nitrogen content per unit area (g N/m²)
+    std::map<uint, float> leaf_nitrogen_gN_m2;
+
     float old_shoot_volume = 0;
 
     float phyllochron_increase = 5;
@@ -1594,6 +1741,18 @@ struct PlantInstance {
 
     CarbohydrateParameters carb_parameters;
 
+    // --- Nitrogen Model --- //
+
+    //! Parameters for the nitrogen model
+    NitrogenParameters nitrogen_parameters;
+
+    //! Root nitrogen pool (g N)
+    float root_nitrogen_pool_gN = 0;
+    //! Available nitrogen pool for leaves to draw from (g N)
+    float available_nitrogen_pool_gN = 0;
+    //! Cumulative nitrogen uptake tracking (g N)
+    float cumulative_N_uptake_gN = 0;
+
     //! Snapshot of shoot parameters that were active when this plant was created
     //! This prevents parameter contamination between different plant types
     std::map<std::string, ShootParameters> shoot_types_snapshot;
@@ -1619,6 +1778,45 @@ struct PlantInstance {
     float attraction_obstacle_reduction_factor = 0.5f;
 };
 
+//! Parameters for USD articulated rigid body export for IsaacSim
+struct USDExportParameters {
+    //! Young's modulus (Pa) for joint stiffness calculation: K = E*I/L
+    float elastic_modulus = 5e9f;
+    //! Density (kg/m^3) for mass calculation from capsule volume
+    float wood_density = 800.f;
+    //! Damping ratio for joint drives (dimensionless). Damping = ratio * 2 * sqrt(K*I)
+    float damping_ratio = 0.1f;
+    //! Static friction coefficient for collision material
+    float static_friction = 0.5f;
+    //! Dynamic friction coefficient for collision material
+    float dynamic_friction = 0.3f;
+    //! Restitution (bounciness) for collision material
+    float restitution = 0.1f;
+    //! Spring stiffness (N*m/rad) for leaf/fruit/flower attachment joints
+    float organ_spring_stiffness = 10.f;
+    //! Damping (N*m*s/rad) for leaf/fruit/flower attachment joints
+    float organ_spring_damping = 1.f;
+    //! Leaf mass per unit area (kg/m^2) — used to compute leaf mass from leaf area
+    float leaf_mass_per_area = 0.05f;
+    //! Mass per fruit (kg)
+    float fruit_mass = 0.01f;
+    //! Mass per flower (kg)
+    float flower_mass = 0.002f;
+    //! PhysX articulation solver position iteration count
+    uint solver_position_iterations = 32;
+    //! Minimum segment length (m). Segments shorter than this are skipped.
+    float min_segment_length = 0.001f;
+};
+
+//! Opaque storage for a single growth animation frame snapshot (defined in InputOutput.cpp)
+struct GrowthFrameSnapshot;
+
+//! Storage container for growth animation frame data
+struct PlantGrowthAnimationStorage {
+    //! Map from plantID to vector of frame snapshots
+    std::map<uint, std::vector<std::shared_ptr<GrowthFrameSnapshot>>> plant_frames;
+};
+
 class PlantArchitecture {
 public:
     //! Main architectural model class constructor
@@ -1632,6 +1830,14 @@ public:
 
     //! Unit test routines
     static int selfTest(int argc, char **argv);
+
+    //! Set a callback function to receive progress updates during long-running operations.
+    /**
+     * \param[in] callback Function that receives (progress_fraction, message_string).
+     *   progress_fraction is in [0, 1]. message describes the current operation phase.
+     *   Pass nullptr or an empty std::function to clear the callback.
+     */
+    void setProgressCallback(std::function<void(float, const std::string&)> callback);
 
     //! Add optional output object data values to the Context
     /**
@@ -1660,9 +1866,11 @@ public:
     /**
      * \param[in] base_position Cartesian coordinates of the base of the plant.
      * \param[in] age Age of the plant in days.
+     * \param[in] build_parameters [optional] Map of parameter names to values for overriding default training system parameters (e.g., trunk height, scaffold count, trellis dimensions). Parameter names are species-specific and documented in the
+     * plant library documentation.
      * \return ID of the plant instance.
      */
-    uint buildPlantInstanceFromLibrary(const helios::vec3 &base_position, float age);
+    uint buildPlantInstanceFromLibrary(const helios::vec3 &base_position, float age, const std::map<std::string, float> &build_parameters = {});
 
     //! Build a canopy of regularly spaced plants based on the model currently loaded from the library
     /**
@@ -1671,9 +1879,12 @@ public:
      * \param[in] plant_count_xy Number of plants in the canopy in the x- and y-directions.
      * \param[in] age Age of the plants in the canopy in days.
      * \param[in] germination_rate [optional] Probability that a plant in the canopy germinates and a plant is created.
+     * \param[in] build_parameters [optional] Map of parameter names to values for overriding default training system parameters (e.g., trunk height, scaffold count, trellis dimensions). Parameter names are species-specific and documented in the
+     * plant library documentation.
      * \return Vector of plant instance IDs.
      */
-    std::vector<uint> buildPlantCanopyFromLibrary(const helios::vec3 &canopy_center_position, const helios::vec2 &plant_spacing_xy, const helios::int2 &plant_count_xy, float age, float germination_rate = 1.f);
+    std::vector<uint> buildPlantCanopyFromLibrary(const helios::vec3 &canopy_center_position, const helios::vec2 &plant_spacing_xy, const helios::int2 &plant_count_xy, float age, float germination_rate = 1.f,
+                                                  const std::map<std::string, float> &build_parameters = {});
 
     //! Build a canopy of randomly scattered plants based on the model currently loaded from the library
     /**
@@ -1681,9 +1892,11 @@ public:
      * \param[in] canopy_extent_xy Size/extent of the canopy boundaries in the x- and y-directions.
      * \param[in] plant_count Number of plants to randomly generate inside canopy bounds.
      * \param[in] age Age of the plants in the canopy in days.
+     * \param[in] build_parameters [optional] Map of parameter names to values for overriding default training system parameters (e.g., trunk height, scaffold count, trellis dimensions). Parameter names are species-specific and documented in the
+     * plant library documentation.
      * \return Vector of plant instance IDs.
      */
-    std::vector<uint> buildPlantCanopyFromLibrary(const helios::vec3 &canopy_center_position, const helios::vec2 &canopy_extent_xy, uint plant_count, float age);
+    std::vector<uint> buildPlantCanopyFromLibrary(const helios::vec3 &canopy_center_position, const helios::vec2 &canopy_extent_xy, uint plant_count, float age, const std::map<std::string, float> &build_parameters = {});
 
     //! Get the shoot parameters structure for a specific shoot type in the current plant model
     /**
@@ -1704,6 +1917,30 @@ public:
      * PhytomerParameters structure.
      */
     std::map<std::string, PhytomerParameters> getCurrentPhytomerParameters();
+
+    //! Get the list of shoot type labels for the currently loaded plant model
+    /**
+     * \return Vector of shoot type label strings for the currently loaded plant model.
+     * \note This method only works if a plant model has been loaded via loadPlantModelFromLibrary(). Use the overload listShootTypeLabels(plant_model_name) to query a specific model without loading, or listShootTypeLabels(plantID) to query a plant
+     * instance.
+     */
+    [[nodiscard]] std::vector<std::string> listShootTypeLabels() const;
+
+    //! Get the list of shoot type labels for a specific plant model without changing current state
+    /**
+     * \param[in] plant_model_name Name of the plant model to query (e.g., "bean", "tomato", "almond"). Use getAvailablePlantModels() to see available plant model names.
+     * \return Vector of shoot type label strings for the specified plant model.
+     * \note This method temporarily loads the plant model to extract shoot type information, then restores the original plant state. The current plant model remains unchanged after calling this method.
+     */
+    [[nodiscard]] std::vector<std::string> listShootTypeLabels(const std::string &plant_model_name);
+
+    //! Get the list of shoot type labels for a specific plant instance
+    /**
+     * \param[in] plantID Unique identifier for the plant instance.
+     * \return Vector of shoot type label strings for the specified plant instance.
+     * \note This method returns the shoot types that were defined when the plant instance was created. The shoot types are captured from the plant model at creation time.
+     */
+    [[nodiscard]] std::vector<std::string> listShootTypeLabels(uint plantID) const;
 
     //! Update the parameters of a single shoot type in the current plant model
     /**
@@ -1743,6 +1980,7 @@ public:
     //! Delete an existing plant instance
     /**
      * \param[in] plantID ID of the plant instance to be deleted.
+     * \note When all plant instances have been deleted, hidden prototype objects are also cleaned up from the Context.
      */
     void deletePlantInstance(uint plantID);
 
@@ -2445,6 +2683,13 @@ public:
      */
     [[nodiscard]] bool isPlantDormant(uint plantID) const;
 
+    //! Determine the phenological stage of a plant
+    /**
+     * \param[in] plantID The ID of the plant to check.
+     * \return Phenological stage: "dormant", "vegetative", "reproductive", or "senescent".
+     */
+    [[nodiscard]] std::string determinePhenologyStage(uint plantID) const;
+
     //! Write all vertices in the plant to a file for external processing (e.g., bounding volume, convex hull)
     /**
      * \param[in] plantID ID of the plant instance.
@@ -2468,9 +2713,10 @@ public:
     //! Get primitive UUIDs for all primitives in a given plant
     /**
      * \param[in] plantID ID of the plant instance.
-     * \return Vector of primitive UUIDs for all primitives in the plant.
+     * \param[in] include_hidden If true, also include UUIDs of hidden prototype primitives managed by this PlantArchitecture instance (prototypes are shared across all plant instances, not specific to one plant).
+     * \return Vector of primitive UUIDs for all primitives in the plant (and optionally hidden prototypes).
      */
-    [[nodiscard]] std::vector<uint> getAllPlantUUIDs(uint plantID) const;
+    [[nodiscard]] std::vector<uint> getAllPlantUUIDs(uint plantID, bool include_hidden = false) const;
 
     //! Get object IDs for all internode (Tube) objects for a given plant
     /**
@@ -2478,6 +2724,15 @@ public:
      * \return Vector of object IDs for all internodes in the plant.
      */
     [[nodiscard]] std::vector<uint> getPlantInternodeObjectIDs(uint plantID) const;
+
+    //! Get object IDs for internode (Tube) objects matching a specified shoot type label
+    /**
+     * \param[in] plantID ID of the plant instance.
+     * \param[in] shoot_type_label Label of the shoot type to filter internodes by.
+     * \return Vector of object IDs for all internodes matching the specified shoot type label.
+     * \note Throws a helios_runtime_error if the plant does not exist or if no shoots with the specified shoot type label are found.
+     */
+    [[nodiscard]] std::vector<uint> getPlantInternodeObjectIDs(uint plantID, const std::string &shoot_type_label) const;
 
     //! Get object IDs for all petiole (Tube) objects for a given plant
     /**
@@ -2520,6 +2775,22 @@ public:
      * \return Vector of object IDs for all fruits in the plant.
      */
     [[nodiscard]] std::vector<uint> getPlantFruitObjectIDs(uint plantID) const;
+
+    //! Assign a fruit count value for each shoot on a plant
+    /**
+     * \param[in] plantID ID of the plant instance.
+     */
+
+    void updateShootFruitCounts(uint plantID) const;
+
+
+    //! Get internode object IDs for all shoots for a given plant
+    /**
+     * \param[in] plantID ID of the plant instance.
+     * \return Vector of object IDs for all shoots in the plant.
+     */
+
+    [[nodiscard]] std::vector<uint> getShootInternodeObjectIDs(uint plantID) const;
 
     //! Get collision-relevant object IDs for a specific plant
     /**
@@ -2591,6 +2862,76 @@ public:
      */
     void disableCarbohydrateModel();
 
+    // -- Nitrogen Model Methods -- //
+
+    /**
+     * \brief Enable the nitrogen model for tracking plant nitrogen status and stress
+     *
+     * The nitrogen model simulates nitrogen uptake, allocation to leaves, remobilization
+     * from old to young leaves, and calculates a nitrogen stress factor (0-1) that other
+     * plugins can optionally use to modify photosynthesis and growth.
+     *
+     * \see disableNitrogenModel(), addPlantNitrogen(), setPlantNitrogenParameters()
+     */
+    void enableNitrogenModel();
+
+    /**
+     * \brief Disable the nitrogen model
+     */
+    void disableNitrogenModel();
+
+    /**
+     * \brief Check if the nitrogen model is enabled
+     * \return True if nitrogen model is enabled, false otherwise
+     */
+    [[nodiscard]] bool isNitrogenModelEnabled() const;
+
+    /**
+     * \brief Set nitrogen model parameters for a single plant
+     * \param[in] plantID Plant ID to set parameters for
+     * \param[in] params Nitrogen parameters struct
+     * \throws helios_runtime_error if plant does not exist
+     */
+    void setPlantNitrogenParameters(uint plantID, const NitrogenParameters &params);
+
+    /**
+     * \brief Set nitrogen model parameters for multiple plants
+     * \param[in] plantIDs Vector of plant IDs
+     * \param[in] params Nitrogen parameters struct
+     * \throws helios_runtime_error if any plant does not exist
+     */
+    void setPlantNitrogenParameters(const std::vector<uint> &plantIDs, const NitrogenParameters &params);
+
+    /**
+     * \brief Initialize nitrogen pools for all plants based on current leaf biomass
+     * \param[in] initial_leaf_N_concentration Initial leaf nitrogen concentration (g N/g DW)
+     */
+    void initializeNitrogenPools(float initial_leaf_N_concentration);
+
+    /**
+     * \brief Initialize nitrogen pools for a specific plant
+     * \param[in] plantID Plant ID to initialize
+     * \param[in] initial_leaf_N_concentration Initial leaf nitrogen concentration (g N/g DW)
+     * \throws helios_runtime_error if plant does not exist
+     */
+    void initializePlantNitrogenPools(uint plantID, float initial_leaf_N_concentration);
+
+    /**
+     * \brief Add nitrogen to a single plant (immediate application to root and available pools)
+     * \param[in] plantID Plant ID to receive nitrogen
+     * \param[in] amount_gN Amount of nitrogen to add (g N)
+     * \throws helios_runtime_error if plant does not exist or amount is negative
+     */
+    void addPlantNitrogen(uint plantID, float amount_gN);
+
+    /**
+     * \brief Add nitrogen to multiple plants (immediate application)
+     * \param[in] plantIDs Vector of plant IDs to receive nitrogen
+     * \param[in] amount_gN Amount of nitrogen to add to each plant (g N)
+     * \throws helios_runtime_error if any plant does not exist or amount is negative
+     */
+    void addPlantNitrogen(const std::vector<uint> &plantIDs, float amount_gN);
+
     // -- manual plant generation from input string -- //
 
     /**
@@ -2644,6 +2985,60 @@ public:
      */
     void writeQSMCylinderFile(uint plantID, const std::string &filename) const;
 
+    //! Write plant as a USD articulated rigid body for NVIDIA IsaacSim physics simulation.
+    /**
+     * Exports the plant structure (internodes, petioles, peduncles, leaves, fruits, flowers) as a
+     * PhysX articulation in USDA (ASCII USD) format. Each tube segment becomes a rigid link with a
+     * capsule collision shape, connected by D6 joints with rotational spring/damper drives derived
+     * from beam bending stiffness (E*I/L). Leaves, fruits, and flowers are represented as mass
+     * bodies attached by spring links at their base positions.
+     *
+     * \param[in] plantID ID of the plant instance to export.
+     * \param[in] filename Path to the output file (should have .usda extension).
+     * \param[in] params Export parameters controlling physics properties and scope.
+     */
+    void writePlantStructureUSD(uint plantID, const std::string &filename, const USDExportParameters &params = USDExportParameters()) const;
+
+    //! Register the current plant state as a growth animation frame.
+    /**
+     * Captures a snapshot of the plant's geometry (all links, transforms, meshes, and materials) at the
+     * current point in the growth simulation. Call this after each \ref advanceTime() step to record the
+     * plant's state for later animation export via \ref writePlantGrowthUSD().
+     *
+     * \param[in] plantID ID of the plant instance to capture.
+     * \param[in] min_segment_length Minimum segment length (m). Segments shorter than this are skipped.
+     */
+    void registerGrowthFrame(uint plantID, float min_segment_length = 0.001f);
+
+    //! Write all registered growth frames as a time-sampled USD animation file for Blender.
+    /**
+     * Exports a USDA file containing all growth frames registered via \ref registerGrowthFrame() as
+     * time-sampled Xform transforms. Each plant organ is an independent prim with animated position and
+     * orientation. Organs that appear during growth are toggled from invisible to visible at the
+     * appropriate time code. The resulting file can be imported directly into Blender.
+     *
+     * This is a visual-only export — no physics prims, joints, or collision shapes are written.
+     *
+     * \param[in] plantID ID of the plant instance to export.
+     * \param[in] filename Path to the output file (should have .usda extension).
+     * \param[in] seconds_per_frame Duration in seconds that each growth frame occupies in the animation (default: 1 second).
+     *   For example, with 6 frames and seconds_per_frame=1.0, the total animation is 5 seconds long.
+     */
+    void writePlantGrowthUSD(uint plantID, const std::string &filename, float seconds_per_frame = 1.0f) const;
+
+    //! Clear stored growth animation frames for a plant.
+    /**
+     * \param[in] plantID ID of the plant instance whose frames should be cleared.
+     */
+    void clearGrowthFrames(uint plantID);
+
+    //! Get the number of registered growth frames for a plant.
+    /**
+     * \param[in] plantID ID of the plant instance to query.
+     * \return Number of frames registered via \ref registerGrowthFrame().
+     */
+    [[nodiscard]] uint getGrowthFrameCount(uint plantID) const;
+
     /**
      * \brief Reads plant structure data from an XML file.
      *
@@ -2663,10 +3058,44 @@ public:
     //! Re-enable standard output from this plug-in
     void enableMessages();
 
+    //! Resolve an asset file path for the plantarchitecture plugin
+    /**
+     * This method resolves asset file paths (textures and OBJ models) for the plantarchitecture plugin,
+     * allowing users to specify simple paths like "OliveBark.jpg" or "MyLeaf.obj" instead of using the
+     * verbose helios::resolvePluginAsset() wrapper.
+     *
+     * Resolution order:
+     * 1. Empty path returns empty string
+     * 2. Absolute paths that exist are returned as-is
+     * 3. Try resolving as a general file path (for already-resolved paths)
+     * 4. Try resolving as a plugin asset path (e.g., "assets/textures/OliveBark.jpg")
+     * 5. If path doesn't have "assets/" prefix, determine subdirectory from file extension:
+     *    - .obj/.mtl files: try "assets/obj/" + filename
+     *    - Other files: try "assets/textures/" + filename
+     *
+     * \param[in] texture_file The asset file path (can be simple filename, relative path, or absolute path)
+     * \return Resolved absolute path to the asset file
+     * \throws helios_runtime_error if the asset file cannot be found
+     */
+    static std::string resolveTextureFile(const std::string &texture_file);
+
     friend struct Phytomer;
     friend struct Shoot;
 
 private:
+    //! Get a validated parameter value from the build parameters map
+    /**
+     * \param[in] build_parameters Map of parameter names to values
+     * \param[in] parameter_name Name of the parameter to retrieve
+     * \param[in] default_value Default value to use if parameter not specified
+     * \param[in] min_value Minimum valid value for the parameter
+     * \param[in] max_value Maximum valid value for the parameter
+     * \param[in] parameter_description Description of the parameter for error messages
+     * \return The parameter value from the map if specified, otherwise the default value
+     * \throws helios_runtime_error if the parameter value is outside the valid range
+     */
+    float getParameterValue(const std::map<std::string, float> &build_parameters, const std::string &parameter_name, float default_value, float min_value, float max_value, const std::string &parameter_description) const;
+
     //! Clear BVH cache (called at start of each growth cycle)
     void clearBVHCache() const;
 
@@ -2686,6 +3115,15 @@ private:
      */
     void setPlantAttractionPoints(uint plantID, const std::vector<helios::vec3> &attraction_points, float view_half_angle_deg = 80.0f, float look_ahead_distance = 0.1f, float attraction_weight = 0.6f, float obstacle_reduction_factor = 0.75f);
 
+    //! Ensure inflorescence prototype maps are initialized for given phytomer parameters
+    /**
+     * This method checks if unique inflorescence prototypes (flowers and fruit) have been created and cached.
+     * If not, it creates and hides the prototype objects. This is necessary before calling createInflorescenceGeometry()
+     * when unique_prototypes > 0, otherwise map::at() will throw an out_of_range exception.
+     * \param[in] params Phytomer parameters containing inflorescence configuration
+     */
+    void ensureInflorescencePrototypesInitialized(const PhytomerParameters &params, const std::string &plant_name);
+
 protected:
     helios::Context *context_ptr;
 
@@ -2695,9 +3133,15 @@ protected:
 
     std::string current_plant_model;
 
+    std::function<void(float, const std::string&)> progress_callback;
+
+    // Current build parameters for plant construction (set before calling builder functions)
+    std::map<std::string, float> current_build_parameters;
+
     // Function pointer maps for plant model registration
     std::map<std::string, std::function<void()>> shoot_initializers;
     std::map<std::string, std::function<uint(const helios::vec3 &)>> plant_builders;
+    std::map<std::string, std::string> plant_type_map;
 
     std::map<uint, PlantInstance> plant_instances;
 
@@ -2716,6 +3160,12 @@ protected:
     // Key is the prototype function pointer; value index is the unique fruit prototype
     std::map<uint (*)(helios::Context *context_ptr, uint subdivisions), std::vector<uint>> unique_fruit_prototype_objIDs;
 
+    //! Get object IDs for all hidden prototype objects managed by this PlantArchitecture instance
+    [[nodiscard]] std::vector<uint> getAllPrototypeObjectIDs() const;
+
+    //! Delete all hidden prototype objects from the Context and clear the prototype maps
+    void deleteAllPrototypes();
+
     bool build_context_geometry_internode = true;
     bool build_context_geometry_petiole = true;
     bool build_context_geometry_peduncle = true;
@@ -2725,7 +3175,7 @@ protected:
     void validateShootTypes(ShootParameters &shoot_parameters, const std::map<std::string, ShootParameters> &shoot_types_ref) const;
 
     //! Register a plant model with its initialization and build functions
-    void registerPlantModel(const std::string &name, std::function<void()> shoot_init, std::function<uint(const helios::vec3 &)> plant_build);
+    void registerPlantModel(const std::string &name, std::function<void()> shoot_init, std::function<uint(const helios::vec3 &)> plant_build, const std::string &plant_type = "herbaceous");
 
     //! Initialize all plant model registrations
     void initializePlantModelRegistrations();
@@ -2776,6 +3226,15 @@ protected:
     void checkCarbonPool_transferCarbon(float dt);
 
     bool carbon_model_enabled = false;
+
+    // --- Nitrogen Model --- //
+
+    void accumulateLeafNitrogen(float dt);
+    void remobilizeNitrogen(float dt);
+    void updateNitrogenStressFactor();
+    void removeFruitNitrogen();
+
+    bool nitrogen_model_enabled = false;
 
     // --- Collision Detection --- //
 
@@ -2873,11 +3332,24 @@ protected:
     //! Flag to enable/disable console output messages
     bool printmessages = true;
 
+    // --- Growth Animation Frame Storage --- //
+
+    //! Storage for growth animation frames registered via registerGrowthFrame()
+    PlantGrowthAnimationStorage growth_animation_storage;
+
     // --- Plant Library --- //
 
     void initializeAlmondTreeShoots();
 
     uint buildAlmondTree(const helios::vec3 &base_position);
+
+    void initializeAlmondTreeAldrichShoots();
+
+    uint buildAlmondTreeAldrich(const helios::vec3 &base_position);
+
+    void initializeAlmondTreeWoodColonyShoots();
+
+    uint buildAlmondTreeWoodColony(const helios::vec3 &base_position);
 
     void initializeAppleTreeShoots();
 
